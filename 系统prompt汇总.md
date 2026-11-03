@@ -27,7 +27,7 @@
 **两条铁律：**
 
 1. **一处改，处处同步。** 同一句规则散落在提示词和本地正则里（比如「不吃辣」既在第 2 节的输出规范里，也在第 3.4 节的 `noSpicy` 正则里），改一边必须看另一边。
-2. **改完跑 `npm run smoke`。** 84 条用例里有多条专门防这些规则回归（用例数随功能增加，以脚本实际输出为准；另有 2 条「白天不许提深夜」的时间用例只在 05:00–23:00 生效，夜里自动跳过）。
+2. **改完跑 `npm run smoke`。** 上百条用例里有多条专门防这些规则回归（用例数随功能增加，以脚本实际输出为准；另有 2 条「白天不许提深夜」的时间用例只在 05:00–23:00 生效，夜里自动跳过）。
 
 ---
 
@@ -154,7 +154,7 @@ intent = "chat" 是默认，包括：
 
 **推荐时的红线：**
 
-- **商品明细不用你写，也不许你写**：名字、为什么适合他、活动、到手价、注意事项，系统按真实选品结果**逐款拼在 reply 后面**（↴ 见 5.5）。你只写开头那一两句（接住人 + 说清挑选方向）
+- **商品明细不用你写，也不许你写**：名字、价格、理由、活动、注意事项，系统按真实选品结果**做成卡片挂在气泡下面**（↴ 见 5.5）。你只写开头那一两句（接住人 + 说清挑选方向）——气泡里不列清单
 - **开头那句话不许碰活动和价格**：有没有活动、到手多少，系统按真实数据说——你提前评一句"力度很大""都没活动"，几乎必然说错
 - 禁止"为您推荐""本店热销""好评如潮""限时特惠"这类电商广播腔
 - 禁止"亲""宝子""老板"这类客服称位，也不许用导购腔说"您看这款"
@@ -700,8 +700,24 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 `extractMemoryKeyword` 从「忘了我说过不吃辣」里抠目标：
 
 ```text
-不吃辣|不想吃辣|不能吃辣|忌辣|不吃甜|不吃酸|花生过敏|坚果过敏|海鲜过敏|乳制品过敏|喜欢[^，。！？\s]{1,6}
+不吃辣|不想吃辣|不能吃辣|不碰辣|忌辣|不吃甜|不想吃甜|不要甜|不吃酸|不想吃酸|忌酸
+|花生过敏|坚果过敏|海鲜过敏|海产品过敏|乳制品过敏|牛奶过敏|乳糖不耐
+|30元内|30-60元|60元以上|10元内|10-30元
+|甜味|咸味|酸味|辣味|清淡|嚼感|口感|脆|软|辣|甜|咸|酸|预算
 ```
+
+**只列偏好对象本身，不挂动词兜底**（2026-11-03 修）。
+以前末尾有一条 `喜欢[^，。！？\s]{1,6}`，于是「忘掉我喜欢辣味」抠出来的是「喜欢辣味」——
+记忆里存的 keyword 是「辣味」（`factsFromMessage` 取的是 `like[1]`），`deleteMemory` 的
+`includes` 比不中，就回"你要我忘掉哪条，我不猜"，用户明明说了要忘却被当成没说清。
+
+「喜欢辣味」「爱吃甜的」「喜欢嚼感」这类正向说法，靠白名单直接命中偏好对象；
+白名单一个都没认出来时才走 `MEMORY_LIKE_PATTERN`（`(?:喜欢|爱吃|爱喝|偏爱|偏好|最?爱|就好|就爱|只吃|只爱)(?:吃|喝)?(.{1,6})`），
+只取动词后面的宾语（「忘掉我喜欢薯片」→ 薯片），绝不把「喜欢」带出去。
+
+> 单字 `辣/甜/咸/酸/脆/软` 是刻意留的：记忆里可能存的是「辣味」也可能是「辣的」，
+> `deleteMemory` 用 `includes` 匹配，单字两边都能中。反过来说，`辣味` 必须排在 `辣` 前面，
+> 否则回复里那句"XX这条我删了"会只剩一个字。
 
 ### 5.2 记忆问答模板
 
@@ -757,44 +773,61 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 
 ### 5.5 推荐话术合成（`lib/llm/reply-composer.ts`）
 
-Coze 工作流里「客服回复生成器」节点的本地版。**商品名、活动、到手价、风险一律本地按结构化数据拼**，
+Coze 工作流里「客服回复生成器」节点的本地版。**风险提示与选品建议一律本地按结构化数据拼**，
 不让模型复述——让它照着卡片再写一遍必错（漏一款、写错价、编出不存在的活动都是事故）。模型的活只有开头那句人话。
+
+**气泡里不再列商品明细**（2026-11-03 改）。以前这里是 `1. {商品名}｜{原价}元` 逐款往下排，
+结果是模型偶尔自己也写一份清单，两段拼起来成了缝合怪：
+
+```text
+要不你先说句「随便」，我就直接给你排上 1. 麻辣魔芋爽｜29.9元…
+```
+
+现在明细只有一个出处 = `recommendations` 数组（卡片上已有名字 / 价格 / 理由 / 活动 / 省多少），
+气泡只留：**过渡语 + 风险提示（不带价） + 主推/备选建议（不带价） + 收尾话口**。
 
 拼出来的结构：
 
 ```text
-{模型写的过渡语}
-{（只有主动问优惠且都没活动时才加）这几样现在都没赶上活动，我按你说的要求挑的：}
-1. {商品名}｜{原价}元
-   {为什么适合他：user_visible_reasons 前两条}
-   {活动名 · 券名 · 到手约X元，省Y元} 或 {这款现在没活动}
-   ⚠ {风险：略超预算 / 含XX过敏原 / 辣度较高}
-2. …
-3. …
-{主推 vs 备选的差异 + 明确选择建议}{；凑单建议（差额 ≤ 12 元且同品类才说）}
+{模型写的过渡语，清洗后；切光了落兜底「行，换个方向给你挑——」}
+{（只有主动问优惠且都没活动时才加）这几样现在都没赶上活动，我按你说的要求挑的}
+⚠ {商品名}：{风险，只留不带价的：含XX过敏原 / 辣度较高}；{另一款}：…
+{主推 vs 备选：想综合实力最强选A，想少花点选B}
 {有优惠时}具体优惠以结算页显示为准
-这三样你更想吃哪一挂的？
+{3 款：这三样你更想吃哪一挂的？ / 少于 3 款：shortfall_note 或 要不要我再换一批？}
 ```
+
+过渡语清洗（`sanitizeTransition`，两条 route 与 `composeRecommendReply` 都会过一遍）：
+
+| 切什么的 | 规则 |
+|---|---|
+| 商品明细 | 从第一行 `^\s*\d+\s*[.、)）]` 或带 `｜数字` 的行开始**整段截掉**（后面跟的理由/注意事项一并不留）；再按句过滤掉带价格（`PRICE_PATTERN`）的句子 |
+| 内部引导语 | `META_INSTRUCTION_PATTERN = /说句\|说一句\|说个\|你就说\|只要说\|说声\|告诉我你(要\|想)\|我就直接\|直接给你排\|给你排上\|如果\|假如\|假设\|要是你(说\|想)/` 整句切掉——用户不需要知道系统在等哪个暗号 |
+| 切光了 | 返回 `undefined`，调用方落 `pickTransition`；`composeRecommendReply` 内再兜「行，换个方向给你挑——」（请求里带「换」时）/「行，这几个给你挑好了——」 |
 
 规则清单：
 
 | 规则 | 说明 |
 |---|---|
 | 按需说优惠 | `PROMO_ASK = /优惠\|便宜\|活动\|券\|划算\|折扣\|赠\|促销\|满减\|省钱/`。**问了**：有活动就说，没活动也要回一句"都没赶上活动"；**没问**：有活动顺手带一句，没活动就不提——别整天像在促销 |
-| 如实说超预算 | `risk_notes` 里的"略超预算（X元）"原样写进 ⚠ 行，不许说成预算内 |
-| 主推 vs 备选 | 主推 = 分数最高的那个；给预算党点名最便宜的那款；凑单建议见下 |
-| 凑单建议 | `promo.add_on`：差额 `> 0 && ≤ 12`，且加购款与推荐款同品类才提醒。差额太大或跨品类（买巧克力劝加变态辣鸡翅）都属于添堵 |
+| 超预算不在气泡里说 | `risk_notes` 的"略超预算（X元）"带价，交给卡片；气泡的 ⚠ 行只留"含XX过敏原""辣度较高"这类不带价的事实 |
+| 主推 vs 备选 | 主推 = 分数最高的那个；预算党点名最便宜的那款。**只点名，不报价格** |
+| 凑单建议 | 气泡里不再说凑单（差额带「元」）；卡片底部本来就有"再加份X（¥gap），这单能多省 ¥extra" |
 | 收尾免责 | 任一款有优惠 → 末尾必带"具体优惠以结算页显示为准" |
 | 不制造紧迫感 | 不说"最后一件""现在不买就没了""全网最低" |
 
 > 提示词里已同步加了红线：**过渡语不许评价活动力度、不许报价**（这钱系统按数据说），
 > 也不许列商品清单。改这一段必须连同 `system-prompt.ts` 第三节一起改。
+> 守卫：`scripts/reco-guard.ts` 的【文案】一节把事故现场那句话原样喂进 `composeRecommendReply`，
+> 断言气泡里既没有 `1. ` 编号也没有「元」，且切光后不留空气泡。
 
 ---
 
 ## 6. 第五层：前端开场与兜底文案
 
-**文件**：`app/page.tsx`
+**文件**：
+- `app/_components/constants.ts` —— `WELCOME` / `SCENES` / `QUICK` / `BUDGETS`（2026-11-03 从 `page.tsx` 搬出来，`page.tsx` 只剩组装）
+- `app/page.tsx` —— 报错兜底文案（"啊？刚卡了一下" / "啊？网断了"）
 
 **开场白 `WELCOME`**
 
@@ -816,7 +849,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**商品名、�
 
 `追剧来点` / `去海边带点` / `加班垫垫` / `换一批`
 
-**报错兜底**
+**报错兜底**（`app/page.tsx`，四条发送/流式分支各有一处）
 
 ```text
 啊？刚卡了一下，再说一次？
@@ -923,6 +956,8 @@ Coze 工作流里「客服回复生成器」节点的本地版。**商品名、�
 按时间倒序，每次改提示词/话术/规则都在这里写一行。
 
 | 日期 | 改动 | 涉及文件 |
+| 2026-11-03 | **P1+P2+P3 收口（规则没变，搬了位置、立了基线）**：① **前端文案搬家**——`WELCOME` / `SCENES` / `QUICK` / `BUDGETS` / `PROFILE_TRUSTED_KEYS` 从 `app/page.tsx` 移到 `app/_components/constants.ts`，`page.tsx` 只留组装 + 报错兜底文案（"啊？刚卡了一下" / "啊？网断了"），本节 §6 的「文件」口径已按此更新；改开场白/场景/快捷短语请去 `constants.ts`，别再翻 `page.tsx`。② **格式化基线**：`.prettierrc` 改 `singleQuote: true`（对齐既有代码，避免全仓引号大改），`.prettierignore` 排除 `*.md`（手写中文表格格式化只制造噪声）；`format:check` 由 56 个文件不通过 → 全绿。③ **lint 清干净**：删掉搬走后留在 `local-workflow.ts` / `index.ts` / `brain-stream.ts` 的死引用，未用形参改 `_plan` / `_query` / `_reason` 并注明为何保留（对齐 Coze 节点入参），`npm run lint` 0 error 0 warning。④ **单测**：`tests/*.test.ts` 69 条（admin 票据 12 + profile-guard 35 + reco-guard 22），断言仍只在 `scripts/*-guard.ts` 写一份，`GuardResult` 定义在 `scripts/guard-types.ts`，`npm run verify` = `tsc --noEmit && vitest run` | `app/_components/*` / `app/page.tsx` / `eslint.config.mjs` / `vitest.config.ts` / `.prettierrc` / `.prettierignore` / `tests/*` / `scripts/guard-types.ts` / `lib/llm/{index,brain-stream,local-workflow}.ts` / `lib/memory/store.ts` |
+| 2026-11-03 | **记忆删除正则补正向偏好 + 气泡不再列商品明细**：① `MEMORY_KEYWORD_PATTERN` 去掉末尾的 `喜欢[^，。！？\s]{1,6}` 兜底——它把「忘掉我喜欢辣味」抠成「喜欢辣味」，`deleteMemory` 的 `includes` 比不中记忆里的「辣味」，于是回"你要我忘掉哪条"；改为**只列偏好对象本身**（忌口 / 口味 / 口感 / 预算档，含 `海产品过敏` `牛奶过敏` 新库口径与 `30元内/30-60元/60元以上`），单字 `辣/甜/咸/酸/脆/软` 垫底保证 `includes` 两边都能中；正向说法（喜欢/爱吃/爱喝/偏爱）交给新增的 `MEMORY_LIKE_PATTERN`，只取动词后面的宾语。`extractMemoryKeyword` 改为「白名单优先 → 动词兜底」两段。② `composeRecommendReply` **不再往气泡里排 `1. XX｜X元` 明细**（明细归卡片）：新增 `sanitizeTransition()`——先按行截掉模型自己写的清单，再按句切掉带价格的句子与 `META_INSTRUCTION_PATTERN`（"你先说句随便""如果…我就…"这类把内部 CONSENT 判定讲给用户听的话），切光落兜底过渡语「行，换个方向给你挑——」；⚠ 风险行只留不带价的事实（含过敏原 / 辣度），"略超预算"与凑单句交给卡片；主推/备选建议去掉价格。两条 route（普通 + SSE）都在 `guardReply` 之前过一遍清洗。③ 守卫：`profile-guard` 新增 8 条删除关键词断言（含"忘掉薯片"兜底与"忘掉吧"反向对照），`reco-guard` 新增【文案】9 条（把事故原句喂进去断言无编号/无价格/不留空气泡，另加"正常过渡语原样保留"的反向对照），smoke 新增第 35/36 节 | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/llm/reply-composer.ts` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `scripts/profile-guard.ts` / `scripts/reco-guard.ts` / `scripts/smoke.mjs` |
 | 2026-11-02 | **按意图拆分大模型调用链路（陪聊纯文本自由化 / 推荐结构化严格化）**：新增 `routeIntent()` 本地先定意图，`callBrain` 据此分流——①**纯陪聊链路** `callChatOnly()`：关掉 `response_format: json_object`、提示词换成精简版 `buildChatPrompt()`（只留人设 + 长期记忆 + 时间，不注商品库、不讲业务规则）、温度 `CHAT_TEMPERATURE = 0.75`，偏好不再向模型要（硬约束一律本地 `extractPrefsFromText`）；②**推荐 / 介绍链路**保持原样（完整业务提示词 + json_object + 温度 0.3）。出口拦截同步放宽：新增 `settleChatReply()`，**默认放行模型原话**，只有 `INTERNAL_LEAK_PATTERN` / `PROFANITY_PATTERN` 两条红线才整句作废落 `COMPANION_POOL`，半句夸海口按句裁（`stripPitchSentences`）而不是整句换掉，整句都在画饼先让模型按 `CHAT_NO_PITCH_HINT` 自己重写一次。`fixEmptyPromise()` 改为委托它（签名去掉 `rt`/`filters`），SSE 同步：`streamBrain(…, chatOnly)` 走同一份精简提示词与陪聊温度，且纯文本原文**不再送 `parseBrainResponse`**（那边 `guessIntent` 会把"行啊，想吃就吃呗"里的"想吃"猜成 recommend，凭空甩卡片）。顺带把降级支路（`判 recommend 但没开口要`）也改成走纯陪聊链路补写，删掉 `askCompanionReply()` + `COMPANION_ONLY_HINT`（拿完整业务提示词补写陪聊，与拆分后的口径冲突）；两条入口的 `lead_in` 统一到 `LEAD_IN_REPLY_PATTERN`（SSE 以前图省事判 `/[?？]/`，陪聊追问细节也被标成钩子，下一轮用户回个"嗯"就被当点头甩卡片）。smoke 新增 2.6 节 2 条（陪聊不带 JSON 痕迹 / 不报价不列清单），用例总数 82 → 84 | `lib/prompts/system-prompt.ts` / `lib/llm/index.ts` / `lib/llm/brain-stream.ts` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `scripts/smoke.mjs` / `系统prompt汇总.md` |
 | 2026-11-02 | **长期偏好确定性写入（方案 A）：没出处就不许沉淀**：模型当轮的 `preferences` 只服务本轮选品，能不能进"一直记着"必须由本地确定性代码校验——① 本地 `extractPrefsFromText` 从用户原话抽到，或 ② 模型填的词原样出现在原话里；两条都不占即模型脑补，丢弃。事故原型：用户一句「有什么好吃的」被记成「忌口·花生」，而忌口会真的执行（硬过滤照着拦），用户从此吃不到花生却根本不过敏。改动：① `lib/chat/handlers.ts` 拆成两条口径——`sanitizeProfile`（白名单 + budget 档位，**本轮选品**用）与 `pickTrustedProfile(message, prefs)`（**长期化**用，必须有出处）；`cleanProfile` 改为后者并带上 `message`，两处 route 共 8 个调用点同步 ② `lib/rules/patterns.ts` 补全过敏原正则（花生/坚果/海鲜/乳制品，含"我对花生不行""吃海鲜过敏"等变体）+ 新增 `NO_SOUR_PATTERN`，`extractPrefsFromText` 改用它并补上忌酸 / 海鲜 / 乳制品分支 ③ `app/page.tsx`：`applyPayload` 不再无条件合并 `data.profile`；初始化时**一次性作废**历史脏 profile（`cx_profile_reset_20261102` 标记位，只清一次，否则每次刷新都清空就永远记不住）；✕「忘掉这条」发送的文本改成后端抠得出关键词的形式（口味/预算说成"忘掉我喜欢辣味"），`MEMORY_KEYWORD_PATTERN` 同步补上口味/预算/口感词 ④ `handlers.extractMemoryKeyword` 里那份内联正则并回 `patterns.ts`。守卫 `scripts/profile-guard.ts` 扩到 18 条（含"说了要记得住"的反向对照），smoke 新增第 34 节 | `lib/chat/handlers.ts` / `lib/rules/patterns.ts` / `lib/llm/index.ts` / `app/page.tsx` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / `PROGRESS.md` |
 | 2026-11-02 | **「预算·不限」脑补标签修复**：用户只说了口味（或什么都没说），发一句「有什么好吃的」后侧栏「当前偏好」里就冒出「预算·不限」——用户从没提过预算，还摘不掉。**两头堵**：① 提示词（`lib/prompts/system-prompt.ts`）输出 schema 里 `preferences.budget` 去掉「不限」选项（`10元内\|10-30元\|null`），并加一条硬约束——没提预算 / "随便""都行""不限"一律填 **null**，自造档（"预算5块"）也填 null ② `pickTrustedProfile` 对 budget 再加一道：只留 `budgetFromText` 认得出的档位（min/max 不全是 null），前端 `stripVolatileProfile` 按侧栏 `BUDGETS` 的同源档位过滤，读 localStorage 时剔掉并写回 ③ **「清空手选」顺带清掉长期偏好里的 budget**（手选和"一直记着"在用户眼里是一回事，点了清空却发现标签还在，等于没听他的）。新增 `scripts/profile-guard.ts` 守卫 5 条（不限不进 / 自造档不进 / **反向对照**：10元内 与 10-30元 要留着 / cleanProfile 与 pickTrustedProfile 同口径）+ smoke 端到端 1 条（没提预算 → profile 里没有「不限」） | `lib/prompts/system-prompt.ts` / `lib/chat/handlers.ts` / `app/page.tsx` / `scripts/profile-guard.ts`（新增）/ `scripts/smoke.mjs` / `PROGRESS.md` |

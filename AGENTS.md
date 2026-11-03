@@ -33,7 +33,8 @@
 | `lib/llm/index.ts` | 意图防呆的**调用**与兜底判断、偏好兜底抽取、乱码拦截、话术池、重试与温度策略（正则本体在 `lib/rules/patterns.ts`） |
 | `lib/memory/store.ts` | 记忆分层 / 状态语义、`decideMemoryAction` 规则顺序、`renderMemoryForPrompt` |
 | `app/api/ai/route.ts` | 记忆意图识别与待确认闭环、`factsFromMessage` 写入门槛、`pickTransition` 过渡语池、`renderMemoryReply` 模板（正则本体在 `lib/rules/patterns.ts`） |
-| `app/page.tsx` | `WELCOME` / `SCENES` / `QUICK` / 报错兜底文案 |
+| `app/_components/constants.ts` | `WELCOME` / `SCENES` / `QUICK` / `BUDGETS` / 可信偏好 key（2026-11-03 从 `page.tsx` 搬出，改文案来这里） |
+| `app/page.tsx` | 报错兜底文案（"啊？刚卡了一下" / "啊？网断了"） |
 | `lib/llm/local-workflow.ts` | 选品链路的节点职责与过滤规则 |
 
 ### 改之前

@@ -12,18 +12,18 @@
 
 | 项 | 状态 |
 |---|---|
-| 最后更新 | 2026-11-02（会话：检索重构 · 强约束与诚实理由） |
-| 当前在做 | **无进行中任务**。长期记忆确定性写入 + 检索重构（强约束/诚实理由）均已改完并验过（见 §2 首行） |
-| 最近回归 | typecheck **0 错误**；`npm run guard` **profile + reco 全过**（`fallback-guard` 经 smoke 跑通）；`npm run smoke` **117/117，0 FAIL**；`data/memory.json` 已清到只剩 3 个真实会话 |
+| 最后更新 | 2026-11-03（会话：V1.0 封版 · git / 后台签名 / 记忆备份 + 删除正则 / 气泡明细 → 两条 Bug 复核 → **P1+P2+P3 收口**） |
+| 当前在做 | **无进行中任务**。P0 三件、两个 Bug、P1（lint+单测+format 基线）、P2（`page.tsx` 拆分 + 防抖写盘）、P3（根目录清理）全部完成并验过（见 §2 前三行） |
+| 最近回归 | `npm run verify` **69/69**、`npm run lint` **0 error 0 warning**、`format:check` **全绿**、`guard` **profile 全过 + reco 21/21**；`npm run smoke` **r1 130/130、r2 128/130、r3 130/130**（r2 两条失败都是模型随机会话态：§4 #12「无任何偏好仍追问」与「还是不想吃辣只出 2 张」，与 P1~P3 无关）；浏览器实测：首屏/推荐卡片/刷新读档全正常 |
 | 阻塞 | 无 |
-| 下一步 | 待定。§3 已清空；剩下的都是 §4 里的观察项（#12 smoke 偶发，#13–#17 均已修） |
-| 怎么验证 | `npm run typecheck` + `npm run guard` + `npm run smoke`（dev server 要在 3000 端口；smoke 一轮约 4~5 分钟，后台跑） |
+| 下一步 | 待定。可选项：`npm run build` 生产构建复核、`page.tsx` 再拆（还剩 929 行主壳）、`PROGRESS` §4 里两条偶发用例根治（要给"模型当轮填的 category"加出处校验） |
+| 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8） |
 
 ---
 
 ## 1. 正在做（Doing）
 
-**无进行中任务。** 七项修复已全部改完并验过（见 §2 首行 + 下表第 7 项）。
+**无进行中任务。** P1 / P2 / P3 已收口（见 §2 前三行），此前的七项修复与两个 Bug 也都验过（见 §2）。
 
 | # | 任务 | 做法 | 状态 |
 |---|---|---|---|
@@ -64,6 +64,12 @@
 
 | 日期 | 任务 | 结果 | 关键落点 |
 |---|---|---|---|
+| 2026-11-03 | **P1：lint / 单测 / verify 基线** | ① `eslint.config.mjs`（ESLint 9 flat，宽松优先：`no-explicit-any` 关、`no-unused-vars` 降 warn、风格类交 Prettier）② `vitest.config.ts` + `tests/` 3 个文件共 **69 条**（admin 票据 12 / profile-guard 35 / reco-guard 22），断言仍只在 `scripts/*-guard.ts` 写一份，`scripts/guard-types.ts` 的 `GuardResult` 给 CLI 与 vitest 共用 ③ `npm run verify` = `tsc --noEmit && vitest run` ④ 本次补齐：`.prettierrc` 改 `singleQuote: true`（对齐既有代码，避免全仓引号大改）、`.prettierignore` 排除 `*.md`（手写中文表格格式化只制造噪声），`format:check` 从 56 个文件不通过 → **全绿**；删掉搬走后残留的死引用、未用形参改 `_plan` / `_query` / `_reason` 并注明为何保留，`npm run lint` 35 警告 → **0** | ✅ `verify` 69/69；lint 0 error 0 warning；format:check 全绿；全都不需要 dev server | `eslint.config.mjs` / `vitest.config.ts` / `.prettierrc` / `.prettierignore` / `tests/*` / `scripts/guard-types.ts` / `lib/llm/{index,brain-stream,local-workflow}.ts` / `lib/memory/store.ts` |
+| 2026-11-03 | **P2：`page.tsx` 拆件 + localStorage 防抖** | `app/page.tsx` 1672 → **929 行**，拆出 `app/_components/`：`bubble` / `snack-card` / `filter-panel` / `nav-btn` / `theme-switch` / `theme` / `format` / `storage` / `types` / `constants`（`WELCOME`/`SCENES`/`QUICK`/`BUDGETS`/可信 key）/ `use-debounced-write`。写盘从"每次变化同步 setItem"改成 `useDebouncedWrite`（三处：`cx_chat_v1` 400ms、`cx_profile_v1` 与 `cx_want_v1` 300ms），带 `hydrated` 闸门（首帧不许写，否则只有欢迎语的一版覆盖历史）+ `pagehide` / `visibilitychange` / 卸载时 flush（否则最后几百毫秒的改动会丢） | ✅ Edge 实测：首屏 / 侧栏 / 场景卡渲染正常；发「来点不辣的」出 1 条气泡 + 3 张卡（卡上有价、气泡无价无编号）；刷新后 `cx_chat_v1` 仍有 3 条消息，读档没被首帧覆盖。控制台只有 favicon 404（既有，项目本来就没有 favicon） | `app/page.tsx` / `app/_components/*` / `系统prompt汇总.md` §6 / `AGENTS.md` 规则表 / `README.md` |
+| 2026-11-03 | **P3：根目录清理** | 删掉用完的一次性脚本 `probe4.mjs` / `probe5.mjs` / `tmp-timecheck.mjs` / `scripts/_dedupe.mjs`（都无引用）；`mobile-375.png` 移到 `docs/`；删掉 0 字节的 `smoke-p2.txt`。**刻意保留**：`index.html`（`打开脆香.url` 指向它，服务没起时提示双击 `启动.bat`）、`workflow.txt`（README 与代码注释里的 Coze 节点编号对照）、`启动.bat` / `run-server.bat` / `silent-start.vbs` / `开机自启.bat` / `取消开机自启.bat`（用户双击的启动器，挪走就断链）、`cuixiang_prompt.md`（已是指向真源的入口文件） | ✅ 根目录只剩文档 / 启动器 / 配置；tmp 脚本在 git 里显示为 `D`，全仓库无残留引用 | 根目录 / `docs/` / `scripts/` |
+| 2026-11-03 | **两条 Bug 的回归复核（无代码改动）** | 复现路径重跑：①「忘掉我喜欢辣味」→ `memory_action=deleted`，再查 core_profile 无辣（三轮全过）② 追问两轮 →「换一批」→ 气泡无 `1. ` 编号、无价格、无「说句/我就直接/给你排上」（三轮全过）③ 脚本里的两份断言（smoke 35/36 节 + profile-guard 删除关键词组 + reco-guard【文案】9 条）本来就是为这两条写的，本轮**全部绿**，未新增用例。**顺带发现并清掉一个假故障**：`.next/types/*.ts` 被半截写入（尾部 NUL），`tsc` 报一堆 `TS1127 Invalid character` 指向生成文件，删/改名 `.next` 后 typecheck 恢复 0 错误（见 §4 #18） | smoke `smoke-r1/r2/r3.txt`；profile-guard / reco-guard；`.next`（构建缓存，已重新生成） |
+| 2026-11-03 | **记忆删除正则盲区 + 强推文案缝合（两个用户报的 Bug）** | ①「忘掉我喜欢辣味」回"你要我忘掉哪条"：`MEMORY_KEYWORD_PATTERN` 末尾那条 `喜欢[^…]{1,6}` 把动词一起抠成「喜欢辣味」，`deleteMemory` 的 `includes` 比不中记忆里的「辣味」→ 改为**只列偏好对象本身**（含 `海产品过敏`/`牛奶过敏`/新预算档，单字 辣/甜/咸/酸/脆/软 垫底），正向说法交给新增 `MEMORY_LIKE_PATTERN`（只取动词后面的宾语）。②「换一批」后气泡出现"要不你先说句「随便」，我就直接给你排上 1. 麻辣魔芋爽｜29.9元…"：`composeRecommendReply` **不再往气泡里排 `1. XX｜X元` 明细**（明细归卡片），新增 `sanitizeTransition()`——按行截掉模型自写的清单、按句切掉带价句与 `META_INSTRUCTION_PATTERN`（"你先说句随便/如果…我就…"），切光落「行，换个方向给你挑——」；⚠ 风险行只留不带价事实，超预算/凑单归卡片；两条 route 的 transition 都先过清洗；提示词两处"系统会逐款拼在 reply 后面"同步改成"做成卡片挂在气泡下面"。**typecheck 0；guard profile 34 + reco 21（各 +8/+9）；smoke 130/130（r3；r1/r2 失败的两条：一条是旧断言要求气泡必须有 `1.`，按新口径已改；另一条"还是不想吃辣→3 张卡"在 r2 出 2 张，r1/r3 均过，属模型随机会话态偶发，见 §4 #12 同类）** | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/llm/reply-composer.ts` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `lib/prompts/system-prompt.ts` / `scripts/profile-guard.ts` / `scripts/reco-guard.ts` / `scripts/smoke.mjs` / `系统prompt汇总.md` §5.1 §5.5 §8 |
+| 2026-11-03 | **V1.0 封版 + P0 三件（安全/数据）** | ① 装 git 2.56.0（choco）+ `git init`，首次提交 `5654104 feat: V1.0 封版`（58 文件，日志与 `data/` 已排除；`.gitignore` 补 `*.log` / `smoke-*.txt` / `*.flag` / `.playwright-cli/`）② `/admin` 登录态从常量 cookie `cx_admin=1` 改为 HMAC 票据 `<exp>.<hmac(exp)>`，密钥由 `ADMIN_PASSWORD_HASH` 派生（改口令即让旧会话失效），校验含过期/格式/`timingSafeEqual`，口令比对也改常量时间；临时脚本验 9/9（伪造 `1`、换密钥、篡改 exp、篡改签名、过期全挡）③ `writeStore` 覆盖前先 `copyFile` 出 `memory.json.bak`；实测 4/4：写入后主文件变了、`.bak` 存在且等于写入前那一版，并已用它还原干净。**typecheck 0 错误；`npm run guard` profile 26 + reco 12 全过**（未跑 smoke：不涉及选品/提示词） | `lib/admin/session.ts`（新增）/ `app/admin/page.tsx` / `lib/memory/store.ts` / `.gitignore` / 仓库根 `.git` |
 | 2026-11-02 | **长期记忆重构收尾：口语用例 + 开发规范 + 清库** | ① 守卫加 4 条真人口语用例（吃海鲜起疹子 / 喝牛奶拉肚子 / 吃完坚果身上痒 / 我一吃花生就过敏）——补正则前 **3 条抽不到**，给四类过敏原加"吃/喝 + 症状词"变体后全中，反向对照「想吃坚果了」不误伤（症状词是硬要求，防抽反）② `AGENTS.md` 新增【长期记忆抽取规则】：新属性必须动四处（patterns 正则 / extractPrefsFromText / AVOID_TAGS 标签对得上 allergens / guard 断言），断言必须正向+反向成对；顺手删掉「什么算提示词变更」表里重复的一行 ③ 清库：`--days=0` 被 `prune-memory.mjs` 自己拒（`days<=0` 要求正数，且按未活跃天数筛不到今天的测试用户），改按 uid 前缀归档 `guest_`/`probe_`/`smoke_`——主文件 29 → **3 个**（全是真实浏览器会话 `u_*`），39 个进 `data/memory-archive-20261102.json`（不物理删除），备份 `data/memory.json.bak-20261102`。**typecheck 0 错误；smoke 115/115 ×2 轮 0 FAIL**（111 → 115） | `scripts/profile-guard.ts` / `lib/rules/patterns.ts` / `AGENTS.md` / `系统prompt汇总.md` §六 / `docs/TEST_LOG.md` / `data/memory.json` |
 | 2026-11-02 | **长期偏好确定性写入（方案 A，用户拍板）** | 事故：用户在空请求「有什么好吃的」上被记成「忌口·花生」——后端 `data/memory.json` 里 29 个 uid **零命中花生**，纯是前端 profile 缓存的脏数据；而忌口会真的执行，用户吃不到根本不过敏的花生。① **拆两条口径**：`sanitizeProfile`（白名单 + budget 档位，本轮选品用，行为不变）与 `pickTrustedProfile(message, prefs)`（长期化用，**必须有出处**：本地 `extractPrefsFromText` 抽到，或模型填的词原样出现在原话里）② 过敏原正则补全：花生/坚果/海鲜/乳制品 + 忌酸，`extractPrefsFromText` 改用 `patterns.ts` 的正则（原先只在两处各写一份）③ 前端不再无条件合并 `data.profile`；历史脏 profile **一次性作废**（`cx_profile_reset_20261102` 标记位，只清一次）④ ✕「忘掉这条」改成后端抠得出的说法（口味/预算说成"忘掉我喜欢辣味"），`MEMORY_KEYWORD_PATTERN` 同步补口味/预算/口感词；`handlers.extractMemoryKeyword` 那份内联正则并回 `patterns.ts`。**踩坑**：过敏原正则最初写了 `吃坚果`，结果「想吃坚果了」被抽成坚果过敏（想要的东西被当过敏原全滤掉，smoke「点名要坚果」当场挂）——已改为只认"过敏/不行/不能/不碰"否定语境，并补 4 条防误伤反向对照。守卫 22 条 + smoke 第 34 节 | `lib/chat/handlers.ts` / `lib/rules/patterns.ts` / `lib/llm/index.ts` / `app/page.tsx` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / `系统prompt汇总.md` §六 + §8 / `docs/TEST_LOG.md` |
 | 2026-11-02 | **修「预算·不限」脑补标签（用户报 Bug）**：用户只提了口味/什么都没提，发一句「有什么好吃的」后侧栏「当前偏好」就冒出「预算·不限」，反复要求去掉也摘不掉 | ① **源头**：提示词输出 schema 里 `preferences.budget` 原本写着 `10元内\|10-30元\|不限\|null`，模型照着填「不限」→ 改成 `10元内\|10-30元\|null` 并加硬约束（没提 / "随便""都行""不限"一律 null，自造档"5块"也 null）② **后端**：`pickTrustedProfile` 对 budget 加一道 `budgetFromText` 判定——只留 min/max 不全为 null 的档位，「不限」「5块」都是"选品认不出"的假偏好 ③ **前端**：`stripVolatileProfile` 按侧栏 `BUDGETS` 同源档位过滤，读 localStorage 时剔掉**并写回** ④ **清空手选**顺带清掉 profile 里的 budget（口味/忌口不动）。新增 `scripts/profile-guard.ts` 守卫 5 条（含反向对照：10元内 / 10-30元 必须留着）+ smoke 端到端 1 条。**typecheck 0 错误；smoke 93/93 ×2 轮 0 FAIL**（87 → 93） | `lib/prompts/system-prompt.ts` / `lib/chat/handlers.ts` / `app/page.tsx` / `scripts/profile-guard.ts`（新增）/ `scripts/smoke.mjs` / `系统prompt汇总.md` §2 输出格式 + §六 + §8 / `docs/TEST_LOG.md` |
@@ -87,17 +93,16 @@
 
 ## 3. 下一步待办（Next）
 
-2026-11-02 **已清空**：原三条（移动端 UI / `dev:log` / `capture-log` 长跑）都验完了，结论见 §2 首行。
+2026-11-03 **P1 / P2 / P3 全部收口**（见 §2 前三行），原待办表已清空。下面是还值得做但没排期的：
 
 | # | 待办 | 为什么（出处） | 优先级 |
 |---|---|---|---|
-2026-11-02 用户拍板「两条待办都做」→ **#1、#3 已做（见 §2），只剩 #2 在跑**。
+| 1 | `npm run build` 生产构建复核 | 本轮只验了 dev server + 浏览器；生产构建会暴露 SSR / 静态化问题（2026-11-03 未跑） | 中 |
+| 2 | `page.tsx` 再拆 | 拆完还剩 929 行主壳（状态 + 发送链路）；继续拆要动流式/中止逻辑，风险高于收益 | 低 |
+| 3 | 两条偶发用例根治 | §4 #12：模型当轮脑补 `category` / 只凑出 2 款，会把"无偏好仍追问""3 张卡"这两条断言撞红 | 中（要拍板才算行为变更） |
+| 4 | 陪聊链路补 `emotion` 抽取 | §4 #9，影响小，只在本地兜底池挑档时用到 | 低 |
 
-| # | 待办 | 为什么（出处） | 优先级 / 状态 |
-|---|---|---|---|
-| 1 | ~~移动端触摸目标放大（30px → ≥40px）~~ | 见 §4 #11 | ✅ **2026-11-02 已做** |
-| 2 | ~~移动端矮屏 360×640 复测~~ | 上次只测到 375×667，更窄的安卓机没验 | ✅ **2026-11-02 已验**（0 溢出 / 按钮全 ≥40） |
-| 3 | ~~兜底链路并入长期记忆的忌口~~ | 审计发现，见 §4 #13 | ✅ **2026-11-02 已做** |
+历史（2026-11-02 已清空）：移动端触摸目标放大 / 360×640 矮屏复测 / 兜底链路并入长期记忆忌口，三条都验完了，结论见 §2。
 
 ---
 
@@ -113,12 +118,15 @@
 | 4 | **`capture-log` 的 ⚠️ 只是初筛**，不是结论 | `系统prompt汇总.md` §16.4 | 本地接管常常是对的（比如硬要忌口货被拦），必须人工复核 |
 | 5 | **`dev.err.log` 默认不会单独落盘** | `npm run dev` 打到终端；要 `npm run dev:log` 才分离 stdout / stderr | 排查异常时记得用 `dev:log` 起服务 |
 | 6 | **`AGENTS.md` 可能被 IDE 重新生成覆盖**（它是扫描项目生成的） | 本轮观察 | 顶部【新会话启动规则】若消失，照本文件 §5 和 `系统prompt汇总.md` §16.5 重新贴回 |
-| 7 | **本机没有 git** | `git log` / `git status` 都报 CommandNotFound | 改代码必须同步 `系统prompt汇总.md` 变更记录表（那是唯一的历史） |
+| 7 | ~~**本机没有 git**~~ → ✅ **2026-11-03 已解决** | 原状：`git` 报 CommandNotFound，历史只存在 `系统prompt汇总.md` | 已用 choco 装 git 2.56.0 并 `git init`（首次提交 `5654104 feat: V1.0 封版`）。**注意**：装了之后新开的 shell 才有 `git`；当前工具会话仍需走全路径 `C:\Program Files\Git\cmd\git.exe`。身份用 `-c user.name/-c user.email` 临时指定，未写进全局配置 |
 | 8 | **长任务在前台跑会被工具超时掐断，并连带杀掉 dev server** | 日志停在 kill 那一刻、无任何报错，之后全 `ECONNREFUSED` | 一律 `Start-Process` 后台起 + 短命令轮询 |
 | 9 | **陪聊链路不再有模型填的 `preferences`**：纯文本输出拿不到结构，`emotion`（烦/难过/开心…）只有模型会填，本地 `extractPrefsFromText` 不抽。影响面只到本地兜底池挑档（落不到 `emotion` 组就掉进通用池），且只在"模型没吐正文"这条兜底路上才会用到。真要补就给 `extractPrefsFromText` 加一组情绪词 | `lib/llm/index.ts` → `chatResponseFromText` / `settleChatReply` | 影响很小，先记着；要动就同时补 smoke |
 | 12 | **smoke「无任何偏好 → 仍要追问不出卡片」偶发失败**（scripts/smoke.mjs:1065）：2026-11-02 跑三轮里 r1 挂了一次——全新用户单轮发「有什么好吃的」，却出了卡片（奥利奥/每日坚果/海苔卷），模型多半是当轮脑补出了 category / 口味，把追问闸绕过去了；r2 / r3 都是 84/84。**与本次 scene 改动无关**（该用例不传 userProfile、不涉及 profile 回传） | smoke-r1.txt:132（FAIL 行）/ smoke-r2、r3 全绿 | 会话态用例受模型随机性影响，**不要单次通过就下结论**（记忆里的老教训）。真要根治得让 `recommendIntake` 对"模型当轮填的 category"也要求有出处（参照 `statedTaste` 的做法）——属行为变更，等用户拍板 |
 | 13 | ~~**兜底链路没并入长期记忆的忌口**~~：`orchestrator.matchLocalFallback` 的 `avoid_tags` 只来自 `user_profile.avoid`，主链路 `buildNeed` 却有 `memoryAvoidTags(memory)` ——编排抛错 / 选不出货走兜底时，纯靠 `memory.json` 记着的忌口（这轮没提）会漏过滤，过敏用户吃上过敏原 | 2026-11-02 审计发现；`lib/llm/orchestrator.ts` vs `lib/llm/local-workflow.ts:311` | ✅ **2026-11-02 已修**：`matchLocalFallback` 新增可选 `avoidTags`（标签口径，与 `avoidTagsFromText` 翻译出来的合并），`runRecommendation` 把 `memoryAvoidTags(memory)` 传进去。smoke 新增 `scripts/fallback-guard.ts` 守卫 3 条（含反向对照，证明用例有牙） |
 | 17 | **模型脑补的偏好被当成"一直记着"，忌口脑补还会真的执行**：用户一句「有什么好吃的」，模型自己填了 `avoid=花生过敏`，前端无条件合并 → 侧栏挂出「忌口·花生」，且 `violateHardConstraint` 照着它拦，用户从此吃不到花生（根本不过敏）。后端长期记忆里其实一条花生都没有（29 个 uid 全查过），纯是前端 profile 缓存的脏数据 | 2026-11-02 用户报（`data/memory.json` 0 命中花生） | ✅ **2026-11-02 已修（方案 A）**：长期化必须有出处——本地 `extractPrefsFromText` 抽到，或模型填的词原样出现在用户原话里；模型当轮 preferences 只服务本轮选品。选品口径拆成 `sanitizeProfile`（不变）。附带：过敏原正则补全 + 前端历史脏 profile 一次性作废 + ✕ 删除精准匹配关键词 |
+| 19 | **dev server 起在错误的工作目录 → 全站 404**：`Start-Process cmd.exe … npm run dev` 没指定 `-WorkingDirectory` 时，进程可能继承到别的目录，表现为 3000 端口有响应但 `/` 与 `/api/ai` 全 404；`dev-server.log` 里能看到 `Watchpack Error … lstat 'D:\System Volume Information'`（在扫整个 D 盘，说明 root 错了） | 2026-11-03 补跑 smoke 时撞到：r3 大面积空 FAIL（连 `/` 都 404） | 起服务一律 `Start-Process -WorkingDirectory 'd:\codebuddy\脆香cuixiang'`；判断依据是日志里出现 `System Volume Information` 或 `/` 返回 404 |
+| 20 | **dev server 半死 / 被编辑打断 → smoke 中途 `ECONNRESET`**：进程还在、端口还 LISTENING，但请求连接被重置；或 smoke 跑着的时候改了源码，Next 重编译把在建的连接掐断 | 2026-11-03 实测：r1 在 70 秒处 `TypeError: fetch failed … ECONNRESET`；另一次 `Invoke-WebRequest` 直接 down 而 `netstat` 仍显示监听 | 1) 跑 smoke 期间**不要改任何文件**（含文档，Next 会 watch）；2) 开跑前先 `Invoke-WebRequest http://localhost:3000` 探活；3) 半死的进程要 `taskkill /PID <pid> /T /F` 重起，别等它自己恢复 |
+| 18 | **`.next/types/*.ts` 被半截写入 → `tsc` 报一片「假错误」**：`npm run typecheck` 吐出几十条 `.next/types/app/page.ts(1,367x): error TS1127: Invalid character`，源码一行没改。实测那个生成文件 5864 字节、只有一行、**尾部全是 `\u0000`**——dev / 编译过程被打断留下的坏缓存，与代码无关 | 2026-11-03 复核时撞到：typecheck 从 0 错误变成一大片红，先删单个文件又换另一个文件继续报 | 把 `.next` 改名或删掉，再 `npm run typecheck` 即恢复（构建缓存可重新生成，`.gitignore` 已排除 `/.next/`）。**判别依据**：报错行全指向 `.next/` 下的生成文件、且该文件尾部是 NUL 字节；别去改业务代码 |
 | 16 | **「预算·不限」脑补标签**：提示词 schema 里 `preferences.budget` 原本允许填「不限」，模型在用户**没提预算**时就填它，前端照单全收写进 localStorage，侧栏「当前偏好」挂出「预算·不限」，用户反复要求也摘不掉（2026-11-02 用户报）。同类隐患：自造档「5块」选品认不出，挂上去也是"说了不算" | 用户报 Bug | ✅ **2026-11-02 已修**：提示词禁止填「不限」+ 前后端都只存选品认得的档位（`budgetFromText` / 侧栏 `BUDGETS`）+ 读档时清理并写回 + 「清空手选」顺带清 budget。smoke 新增第 33 节 6 条（93/93 ×2 轮） |
 | 15 | **JSON 解析崩溃**：`requestOnce` 里 `await res.json()` 没包 try-catch，上游返回 HTML 错误页 / 半截响应时抛 SyntaxError（"Unexpected token '<'"），看不出是谁家、也不知道该不该重试 | 2026-11-02 用户要求全局排查 | ✅ **2026-11-02 已修**：`requestOnce` / Coze / Dify（触发 + 轮询，轮询那处遇非 JSON 跳过等下一轮而不是判死）全部包上，翻成中文错误；前端两个 `res.json()` 与 SSE `JSON.parse` 本就在 try 里；smoke 新增 `sseEvents()` helper 解析 SSE，半截帧丢掉而不是让整个 smoke 崩在解析上 |
 | 11 | ~~**移动端触摸目标偏小**~~ | 2026-11-02 移动端实测 | ✅ **2026-11-02 已修**：卡片「想要/换一个」、`NavBtn`、换皮肤、快捷短语、口味/价格按钮、抽屉 ✕ 统一抬到 `min-h-[40px]`（`inline-flex items-center justify-center`）；桌面端高度基本不变。见 §2 与 §3 #1 |
