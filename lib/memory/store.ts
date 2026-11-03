@@ -8,9 +8,21 @@
 // 关键约束（来自工作流提示词）：
 //   - 只有 active 的核心画像和概要记忆能作为稳定偏好；碎片记忆只能参考，不能推翻核心画像
 //   - 删除是软删除，必须保留旧内容便于追溯，不能物理抹除
+//
+// ── V2.0：从 data/memory.json 迁到 SQLite（Prisma） ─────────────────────
+//
+// 这一层只换存储，**语义一行没改**：分层的判定、软删除、待确认闭环、注入上限都原样保留。
+// 变化的是三件事：
+//   1. 不再有进程内 MemoryMutex。原来那把锁是为了解决"整份 JSON 读-改-写"的 lost update；
+//      现在每次操作都是带条件的单行/多行写入，SQLite 自身只允许一个写者，
+//      事务边界由 prisma.$transaction 划，锁不再需要（多实例部署要换 Postgres，见 §4 文档）。
+//   2. 不再有"写前备份 memory.json.bak"——备份改由 scripts/backup-db.mjs 单独跑，
+//      不再挂在每次写入的热路径上。
+//   3. 单用户 200 条上限仍在，但改成"写完后按 updatedAt 删掉超出的旧行"：
+//      原来的 `list.slice(-200)` 是数组截断，换到库里就是这句。
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import type { User } from '@prisma/client';
+import { prisma } from '@/lib/db';
 
 export type MemoryLayer = 'core_profile' | 'summary_memory' | 'fragment_memory';
 export type MemoryStatus = 'active' | 'pending' | 'resolved' | 'superseded' | 'deleted';
@@ -70,89 +82,84 @@ export interface MemoryDecisionResult {
   confirmationquestion: string;
 }
 
+/** 库里存的是 String（SQLite 不支持 enum），读出来统一转回联合类型 */
+function castLayer(raw: string): MemoryLayer {
+  return raw === 'summary_memory' || raw === 'fragment_memory' ? raw : 'core_profile';
+}
+
+function castStatus(raw: string): MemoryStatus {
+  switch (raw) {
+    case 'pending':
+    case 'resolved':
+    case 'superseded':
+    case 'deleted':
+      return raw;
+    default:
+      return 'active';
+  }
+}
+
+function castPolarity(raw: string | null): Polarity | undefined {
+  switch (raw) {
+    case '喜欢':
+    case '不喜欢':
+    case '拒绝':
+    case '接受':
+    case '中立':
+    case '不确定':
+      return raw;
+    default:
+      return undefined;
+  }
+}
+
+/** 库行 → 对外形状。字段名保持 created_at / updated_at（调用方按这个口径写的） */
+function toRecord(row: {
+  id: string;
+  layer: string;
+  keyword: string;
+  content: string;
+  context: string | null;
+  category: string | null;
+  polarity: string | null;
+  status: string;
+  source: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): MemoryRecord {
+  return {
+    id: row.id,
+    layer: castLayer(row.layer),
+    keyword: row.keyword,
+    content: row.content,
+    context: row.context ?? undefined,
+    category: row.category ?? undefined,
+    polarity: castPolarity(row.polarity),
+    status: castStatus(row.status),
+    source: row.source ?? undefined,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
+/** 召回格式：有场景就带上场景，没有就只给「关键词：内容」 */
+function fmt(r: MemoryRecord): string {
+  return r.context ? `${r.keyword}：${r.content}（${r.context}）` : `${r.keyword}：${r.content}`;
+}
+
 /**
- * 进程内的串行锁（Promise 链队列）。
+ * 保证 User 行存在。
  *
- * 为什么需要：`readStore` 读、`writeStore` 写是分开的两步，
- * 所以「读-改-写」整体并不原子——两个请求同时读到旧数据，
- * 后写的那份会把先写的整份覆盖掉（lost update）。
- * 原子写（临时文件 + 改名）只保证文件不被写坏，挡不住这种覆盖：
- * 多用户并发、或同一用户连着发几条消息时，记忆会静默丢失。
- *
- * 单进程部署下，一把进程内的队列锁就够把所有读写串起来，
- * 不引入外部依赖；真要多实例部署，再换 better-sqlite3 之类的存储。
+ * 记忆表有外键，写记忆前必须先有用户行。游客是"第一次说话就存在"的，
+ * 前端只带了个 u_xxx 过来，服务端并不知道这个 id——所以这里 upsert 一次，
+ * 已存在的（含已注册用户）一个字都不改。
  */
-class MemoryMutex {
-  private queue: Promise<unknown> = Promise.resolve();
-
-  runExclusive<T>(task: () => Promise<T>): Promise<T> {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-
-    // 排队：把这一轮挂到当前队尾之后，先等前面全部跑完
-    const prev = this.queue;
-    this.queue = prev.then(() => gate);
-
-    return prev.then(async () => {
-      try {
-        return await task();
-      } finally {
-        // 成功失败都要放行，否则后面排队的请求会永久挂住
-        release();
-      }
-    });
-  }
-}
-
-/** 全局唯一的文件锁实例：所有对 memory.json 的读写都走它 */
-const fileLock = new MemoryMutex();
-const DATA_DIR = path.join(process.cwd(), 'data');
-const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
-
-type Store = Record<string, MemoryRecord[]>;
-/**
- * 取某个用户的记录。
- *
- * 为什么不能直接用 `store[userId]`：原型链上有 constructor / toString / valueOf 这些同名属性，
- * 字符白名单又拦不住纯字母的 key，直接取会拿到函数而不是数组，后面一 `.slice` 就炸了。
- * 这里先认 own property，再确认它确实是数组，脏数据一律当空处理。
- */
-function listOf(store: Store, userId: string): MemoryRecord[] {
-  const raw = Object.prototype.hasOwnProperty.call(store, userId) ? store[userId] : [];
-  return Array.isArray(raw) ? raw : [];
-}
-
-async function readStore(): Promise<Store> {
-  try {
-    const raw = await fs.readFile(MEMORY_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object'
-      ? (Object.assign(Object.create(null), parsed) as Store)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-async function writeStore(store: Store): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-
-  // 写前备份：把当前这一版先复制成 memory.json.bak，再覆盖。
-  // 原子写只挡「文件被写成半截」，挡不住「整份被一份错数据覆盖」——
-  // 并发写丢记忆、或上游传进来空 store 时，至少还有上一版可以捞回来。
-  // 首次运行（或手动清空过 data/）还没有 memory.json，复制失败属正常，忽略。
-  try {
-    await fs.copyFile(MEMORY_FILE, `${MEMORY_FILE}.bak`);
-  } catch {
-    /* 没有旧文件就没什么可备份的 */
-  }
-
-  // 原子写：先写临时文件再改名，避免半截文件
-  const tmp = `${MEMORY_FILE}.${process.pid}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(store, null, 2), 'utf8');
-  await fs.rename(tmp, MEMORY_FILE);
+async function ensureUser(tx: Pick<typeof prisma, 'user'>, userId: string): Promise<User> {
+  return tx.user.upsert({
+    where: { id: userId },
+    create: { id: userId, isGuest: true },
+    update: {},
+  });
 }
 
 /**
@@ -165,39 +172,33 @@ export async function recallMemory(
   _query: string = '零食偏好',
   limit: number = 20,
 ): Promise<RecalledMemory> {
-  return fileLock.runExclusive(async () => {
-    const store = await readStore();
-    const list = listOf(store, userId).slice(-limit);
-
-    const fmt = (r: MemoryRecord) =>
-      r.context ? `${r.keyword}：${r.content}（${r.context}）` : `${r.keyword}：${r.content}`;
-
-    // 按最近更新时间排：后面注入提示词时按这个顺序截断，留新不留旧。
-    // updated_at 是 ISO 串，直接比字符串大小就是比时间先后。
-    const recent = (rs: MemoryRecord[]) =>
-      [...rs].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-
-    return {
-      core_profile: recent(
-        list.filter((r) => r.layer === 'core_profile' && r.status === 'active'),
-      ).map(fmt),
-      summary_memory: recent(
-        list.filter((r) => r.layer === 'summary_memory' && r.status === 'active'),
-      ).map(fmt),
-      active_fragments: recent(
-        list.filter((r) => r.layer === 'fragment_memory' && r.status === 'active'),
-      ).map(fmt),
-      pending_fragments: list.filter((r) => r.status === 'pending').map(fmt),
-    };
+  // 只取这个用户最近 limit 条：聊了几个月的用户记录会很长，
+  // 真正影响当前推荐的往往只有最近那几条，注入上限在 renderMemoryForPrompt 里再收一次。
+  const rows = await prisma.memory.findMany({
+    where: { userId },
+    orderBy: { updatedAt: 'desc' },
+    take: Math.max(1, limit),
   });
+
+  const list = rows.map(toRecord);
+  const byLayer = (layer: MemoryLayer, status: MemoryStatus) =>
+    list.filter((r) => r.layer === layer && r.status === status).map(fmt);
+
+  return {
+    core_profile: byLayer('core_profile', 'active'),
+    summary_memory: byLayer('summary_memory', 'active'),
+    active_fragments: byLayer('fragment_memory', 'active'),
+    pending_fragments: list.filter((r) => r.status === 'pending').map(fmt),
+  };
 }
 
 /** 原始记录，删除/失效时要按 keyword 找到目标 */
 export async function listMemory(userId: string): Promise<MemoryRecord[]> {
-  return fileLock.runExclusive(async () => {
-    const store = await readStore();
-    return listOf(store, userId);
+  const rows = await prisma.memory.findMany({
+    where: { userId },
+    orderBy: { updatedAt: 'asc' },
   });
+  return rows.map(toRecord);
 }
 
 export interface WriteEntry {
@@ -211,74 +212,90 @@ export interface WriteEntry {
   source?: string;
 }
 
+/** 单用户记忆条数上限：原来的 `list.slice(-200)`，超过就丢最旧的 */
+const MAX_PER_USER = 200;
+
 /**
- * 写入记忆。同 layer+keyword 的 active 记录做更新而不是堆一条新的，
+ * 写入记忆。同 layer+keyword+status 的已有记录做更新而不是堆一条新的，
  * 否则"不吃辣"会被写几十遍，检索出来的全是重复项。
+ *
+ * 为什么整段包在事务里：这里是"先查有没有、再决定更新还是插入"，
+ * 两步分开做，两个并发请求会各插一条（原来靠 MemoryMutex 串行化，现在靠事务）。
  */
 export async function writeMemory(userId: string, entries: WriteEntry[]): Promise<void> {
-  return fileLock.runExclusive(async () => {
-    if (!entries.length) return;
-    const store = await readStore();
-    const list = listOf(store, userId);
-    const now = new Date().toISOString();
+  if (!entries.length) return;
+
+  await prisma.$transaction(async (tx) => {
+    await ensureUser(tx, userId);
 
     for (const e of entries) {
       const keyword = e.keyword.trim();
       const content = e.content.trim();
       if (!keyword || !content) continue;
 
+      const layer = e.layer;
       const status = e.status || 'active';
-      const existing = list.find(
-        (r) => r.layer === e.layer && r.keyword === keyword && r.status === status,
-      );
+
+      const existing = await tx.memory.findFirst({
+        where: { userId, layer, keyword, status },
+        orderBy: { updatedAt: 'desc' },
+      });
+
       if (existing) {
-        existing.content = content;
-        existing.context = e.context ?? existing.context;
-        existing.updated_at = now;
+        await tx.memory.update({
+          where: { id: existing.id },
+          data: {
+            content,
+            context: e.context ?? existing.context,
+            // category / polarity / source 只在这次真带了的时候覆盖，避免把已有标注冲成 null
+            category: e.category ?? existing.category,
+            polarity: e.polarity ?? existing.polarity,
+            source: e.source ?? existing.source,
+          },
+        });
         continue;
       }
-      list.push({
-        id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-        layer: e.layer,
-        keyword,
-        content,
-        context: e.context,
-        category: e.category,
-        polarity: e.polarity,
-        status,
-        source: e.source || '对话提取',
-        created_at: now,
-        updated_at: now,
+
+      await tx.memory.create({
+        data: {
+          userId,
+          layer,
+          keyword,
+          content,
+          context: e.context ?? null,
+          category: e.category ?? null,
+          polarity: e.polarity ?? null,
+          status,
+          source: e.source || '对话提取',
+        },
       });
     }
 
-    store[userId] = list.slice(-200); // 兜个上限，别让文件无限涨
-    await writeStore(store);
+    // 超出上限的旧记录删掉。按 updatedAt 倒序跳过前 200 条，剩下的一次 deleteMany。
+    const overflow = await tx.memory.findMany({
+      where: { userId },
+      orderBy: { updatedAt: 'desc' },
+      skip: MAX_PER_USER,
+      select: { id: true },
+    });
+    if (overflow.length) {
+      await tx.memory.deleteMany({ where: { id: { in: overflow.map((r) => r.id) } } });
+    }
   });
 }
 
 /** 软删除：标记 deleted，保留原文便于追溯 */
 export async function deleteMemory(userId: string, keyword: string): Promise<boolean> {
-  return fileLock.runExclusive(async () => {
-    const store = await readStore();
-    const list = listOf(store, userId);
-    const now = new Date().toISOString();
-    let hit = false;
-
-    for (const r of list) {
-      if (r.status === 'deleted' || r.status === 'superseded') continue;
-      if (r.keyword.includes(keyword) || r.content.includes(keyword)) {
-        r.status = 'deleted';
-        r.updated_at = now;
-        hit = true;
-      }
-    }
-    if (hit) {
-      store[userId] = list;
-      await writeStore(store);
-    }
-    return hit;
+  // 已经 deleted / superseded 的不再重复处理（保留第一次的状态，追溯才有意义）
+  const hit = await prisma.memory.updateMany({
+    where: {
+      userId,
+      status: { notIn: ['deleted', 'superseded'] },
+      OR: [{ keyword: { contains: keyword } }, { content: { contains: keyword } }],
+    },
+    data: { status: 'deleted' },
   });
+  return hit.count > 0;
 }
 
 /**
@@ -296,81 +313,72 @@ export async function resolvePending(
   userId: string,
   confirm: boolean,
 ): Promise<{ keyword: string; content: string } | null> {
-  return fileLock.runExclusive(async () => {
-    const store = await readStore();
-    const list = listOf(store, userId);
-    const now = new Date().toISOString();
-
-    // 一次只办结最近的那条：同时挂好几个待确认的话，用户一句"对"说不清Yes的是哪个
-    const pending = [...list].reverse().find((r) => r.status === 'pending');
+  return prisma.$transaction(async (tx) => {
+    // 一次只办结最近的那条：同时挂好几个待确认的话，用户一句"对"说不清 Yes 的是哪个
+    const pending = await tx.memory.findFirst({
+      where: { userId, status: 'pending' },
+      orderBy: { updatedAt: 'desc' },
+    });
     if (!pending) return null;
 
     const baseKeyword = pending.keyword.replace(/^待确认_/, '');
 
     if (!confirm) {
-      pending.status = 'resolved';
-      pending.updated_at = now;
-      store[userId] = list;
-      await writeStore(store);
+      await tx.memory.update({ where: { id: pending.id }, data: { status: 'resolved' } });
       return { keyword: baseKeyword, content: pending.content };
     }
 
     // 转正前先把旧偏好作废：同一个 keyword 的 active 记录不能再继续当稳定偏好用，
     // 否则推荐会同时吃到"不吃辣"和"喜欢辣"两条相反的约束。
-    for (const r of list) {
-      if (r.id === pending.id || r.status !== 'active') continue;
-      if (
-        r.keyword === baseKeyword ||
-        baseKeyword.includes(r.keyword) ||
-        r.keyword.includes(baseKeyword)
-      ) {
-        r.status = 'superseded';
-        r.updated_at = now;
-      }
+    //
+    // 这里刻意把 active 行捞到内存里比，而不是让数据库做：
+    // 判定条件是「相等 / 互相包含」三条，SQLite 里表达不了"被包含于"，
+    // 一个用户的 active 记录也就几条，捞出来比更简单也不慢。
+    const active = await tx.memory.findMany({
+      where: { userId, status: 'active', id: { not: pending.id } },
+      select: { id: true, keyword: true },
+    });
+    const doomed = active
+      .filter(
+        (r) =>
+          r.keyword === baseKeyword ||
+          baseKeyword.includes(r.keyword) ||
+          r.keyword.includes(baseKeyword),
+      )
+      .map((r) => r.id);
+    if (doomed.length) {
+      await tx.memory.updateMany({
+        where: { id: { in: doomed } },
+        data: { status: 'superseded' },
+      });
     }
 
-    list.push({
-      id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-      layer: 'core_profile',
-      keyword: baseKeyword,
-      content: pending.content,
-      context: pending.context,
-      category: pending.category,
-      polarity: pending.polarity,
-      status: 'active',
-      source: '冲突确认',
-      created_at: now,
-      updated_at: now,
+    await tx.memory.create({
+      data: {
+        userId,
+        layer: 'core_profile',
+        keyword: baseKeyword,
+        content: pending.content,
+        context: pending.context,
+        category: pending.category,
+        polarity: pending.polarity,
+        status: 'active',
+        source: '冲突确认',
+      },
     });
-    pending.status = 'resolved';
-    pending.updated_at = now;
 
-    store[userId] = list.slice(-200);
-    await writeStore(store);
+    await tx.memory.update({ where: { id: pending.id }, data: { status: 'resolved' } });
     return { keyword: baseKeyword, content: pending.content };
   });
 }
 
 /** 一次性全清：同样只做软删除，历史留着可追溯 */
 export async function clearMemory(userId: string): Promise<number> {
-  return fileLock.runExclusive(async () => {
-    const store = await readStore();
-    const list = listOf(store, userId);
-    const now = new Date().toISOString();
-    let n = 0;
-
-    for (const r of list) {
-      if (r.status === 'deleted') continue;
-      r.status = 'deleted';
-      r.updated_at = now;
-      n++;
-    }
-    if (n) {
-      store[userId] = list;
-      await writeStore(store);
-    }
-    return n;
+  const hit = await prisma.memory.updateMany({
+    where: { userId, status: { not: 'deleted' } },
+    data: { status: 'deleted' },
   });
+  return hit.count;
 }
 
 /** 失效声明：旧记忆不再作为当前偏好，但不抹掉历史 */
@@ -380,20 +388,13 @@ export async function supersedeMemory(
   // 第三参是给 Coze 节点留的"为什么失效"，本地记在 updated_at 里就够，暂不落字段
   _reason?: string,
 ): Promise<void> {
-  return fileLock.runExclusive(async () => {
-    const store = await readStore();
-    const list = listOf(store, userId);
-    const now = new Date().toISOString();
-
-    for (const r of list) {
-      if (r.status !== 'active') continue;
-      if (r.keyword.includes(keyword) || r.content.includes(keyword)) {
-        r.status = 'superseded';
-        r.updated_at = now;
-      }
-    }
-    store[userId] = list;
-    await writeStore(store);
+  await prisma.memory.updateMany({
+    where: {
+      userId,
+      status: 'active',
+      OR: [{ keyword: { contains: keyword } }, { content: { contains: keyword } }],
+    },
+    data: { status: 'superseded' },
   });
 }
 
@@ -402,6 +403,9 @@ export async function supersedeMemory(
  * 规则顺序沿用工作流提示词，最要紧的两条：
  *   1. 过敏 / 明确忌口是高优先级，遇到就直接写，不走确认
  *   2. 与稳定偏好相反时才要求确认，不同场景的偏好不算冲突
+ *
+ * 注意：这一段是**纯函数**，与存储无关，迁库时刻意一行没动——
+ * 它同时是提示词规则的落点，动了要连带改《系统prompt汇总》§5。
  */
 export function decideMemoryAction(
   facts: MemoryFact[],

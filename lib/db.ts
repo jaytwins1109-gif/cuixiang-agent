@@ -9,7 +9,36 @@
 //
 // 生产环境不需要这层：进程起来一次，模块只求值一次。
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
+
+/**
+ * 脚本侧的环境变量兜底。
+ *
+ * Next 起来时会自己加载 .env / .env.local，但 `node scripts/xxx.mjs` 不会——
+ * Prisma Client 也不读 .env（只有 prisma CLI 读）。少了这一步，
+ * 任何直连 store 的脚本都会抛 "Environment variable not found: DATABASE_URL"，
+ * 而且报错位置在库内部，看着像连不上库，很容易误判。
+ * 只在真的缺变量时才读一次，Next 里等于空转。
+ */
+function ensureDatabaseUrl(): void {
+  if (process.env.DATABASE_URL) return;
+  try {
+    const raw = fs.readFileSync(path.join(process.cwd(), '.env'), 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+      const m = /^\s*DATABASE_URL\s*=\s*(.+?)\s*$/.exec(line);
+      if (m) {
+        process.env.DATABASE_URL = m[1].replace(/^["']|["']$/g, '');
+        return;
+      }
+    }
+  } catch {
+    // 没有 .env 就交给 Prisma 自己报错，它的提示更准
+  }
+}
+
+ensureDatabaseUrl();
 
 /** 开发态挂在 global 上的缓存（Next 热重载会保留 globalThis） */
 const globalForPrisma = globalThis as unknown as { cxPrisma?: PrismaClient };
