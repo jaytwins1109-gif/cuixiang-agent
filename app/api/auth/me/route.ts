@@ -17,8 +17,11 @@ import {
   GUEST_COOKIE,
   GUEST_MAX_AGE,
   TOKEN_COOKIE,
+  TOKEN_MAX_AGE,
   clearCookieString,
   cookieString,
+  signUserToken,
+  userTokenRemaining,
   verifyUserToken,
 } from '@/lib/auth/jwt';
 import { resolveIdentity } from '@/lib/auth/identity';
@@ -52,7 +55,7 @@ export async function GET(req: NextRequest) {
       const user = await prisma.user.findUnique({ where: { id: tokenUserId } });
       if (user) {
         const memory = await recallMemory(tokenUserId);
-        return NextResponse.json({
+        const res = NextResponse.json({
           userId: user.id,
           email: user.email,
           isGuest: user.isGuest,
@@ -62,6 +65,22 @@ export async function GET(req: NextRequest) {
             active_fragments: memory.active_fragments,
           },
         });
+        /**
+         * 滑动续期：票据寿命过半就换一张新的。
+         *
+         * 不续的话，登录 30 天后的那一刻用户会被静默踢回游客态——记忆还在，
+         * 但侧栏突然"变空"，他只会觉得"这破站又抽了"。前端每次打开页面都会打
+         * 这个接口，所以活跃用户永远在被踢之前就换好票了。
+         * 只在过半时续，避免每次刷新都写一次 Set-Cookie。
+         */
+        const remaining = await userTokenRemaining(req.cookies.get(TOKEN_COOKIE)?.value);
+        if (remaining !== null && remaining < TOKEN_MAX_AGE / 2) {
+          const fresh = await signUserToken(user.id).catch(() => null);
+          if (fresh) {
+            res.headers.append('Set-Cookie', cookieString(TOKEN_COOKIE, fresh, TOKEN_MAX_AGE));
+          }
+        }
+        return res;
       }
       staleToken = true;
     } catch (err) {

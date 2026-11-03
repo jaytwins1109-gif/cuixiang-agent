@@ -5,9 +5,12 @@
 //
 // 优先级（从强到弱）：
 //   1. cx_token cookie  —— 已登录用户，服务端签名，userId 以票据为准（不再清洗）
-//   2. x-guest-id 请求头 —— V2.0 前端主路径
-//   3. body.userId       —— 旧前端兼容（smoke 也走这条），V2.1 删
-//   4. 都没有            —— 现发一个 guest id
+//   2. x-guest-id 请求头 —— 前端主路径
+//   3. 都没有            —— 现发一个 guest id
+//
+// **没有 `body.userId` 这一档了**（V2.1 删除）。留着它等于允许客户端自报身份：
+// 谁都能把 body 里的 userId 写成别人的 id，读走别人的记忆。旧前端在 V2.0 就已经
+// 统一改成发 `x-guest-id` 头，这条兼容通道只剩攻击面，没有使用者。
 //
 // 顺带负责"补发票据"：游客第一次来（或票据与 id 对不上）时签一张 cx_guest，
 // 由调用方塞进响应头。没有这张票，/api/auth/upgrade 拒绝升级——这是刻意设计的。
@@ -22,7 +25,7 @@ import {
 } from './jwt';
 import { normalizeUserId } from './user-id';
 
-export type IdentitySource = 'token' | 'guest-header' | 'body' | 'new-guest';
+export type IdentitySource = 'token' | 'guest-header' | 'new-guest';
 
 export interface Identity {
   userId: string;
@@ -33,19 +36,17 @@ export interface Identity {
   guestTicket?: string;
 }
 
-export async function resolveIdentity(req: NextRequest, bodyUserId?: unknown): Promise<Identity> {
-  // 1) 登录态：票据说你是谁就是谁，body 里传什么都盖不掉
+export async function resolveIdentity(req: NextRequest): Promise<Identity> {
+  // 1) 登录态：票据说你是谁就是谁，请求体里传什么都盖不掉
   const tokenUserId = await verifyUserToken(req.cookies.get(TOKEN_COOKIE)?.value);
   if (tokenUserId) {
     return { userId: tokenUserId, isGuest: false, source: 'token' };
   }
 
-  // 2) 游客：头 > body > 新发
-  const headerRaw = req.headers.get('x-guest-id');
-  const bodyRaw = typeof bodyUserId === 'string' ? bodyUserId : '';
-  const raw = headerRaw || bodyRaw;
-  const source: IdentitySource = headerRaw ? 'guest-header' : bodyRaw ? 'body' : 'new-guest';
-  const userId = normalizeUserId(raw);
+  // 2) 游客：只认请求头，没有就现发一个
+  const headerRaw = req.headers.get('x-guest-id') || '';
+  const source: IdentitySource = headerRaw ? 'guest-header' : 'new-guest';
+  const userId = normalizeUserId(headerRaw);
 
   // 3) 票据自检：对得上就不重发，对不上（没票 / 换了 id / 过期）就签一张新的
   const ticketGuest = await verifyGuestTicket(req.cookies.get(GUEST_COOKIE)?.value);

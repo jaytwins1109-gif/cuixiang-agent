@@ -117,7 +117,8 @@ async function ask(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      // V2.0 起游客身份走请求头；body.userId 仍带上（兼容期两条并存，服务端以头为准）
+      // 游客身份**只走请求头**：V2.1 已删 body.userId 兼容通道，
+      // 客户端自报身份等于允许读别人的记忆，这条必须只有一条路
       ...(userId ? { 'x-guest-id': userId } : {}),
     },
     body: JSON.stringify({
@@ -127,7 +128,6 @@ async function ask(
       inRecommendContext,
       lastPicks,
       userProfile,
-      userId,
     }),
   });
   let data;
@@ -774,6 +774,24 @@ expect(
     r2.status === 200 && !(await keys()).includes('constructor'),
     `status=${r2.status}`,
   );
+
+  // V2.1：body.userId 这条兼容通道已删。客户端自报身份 = 能读别人的记忆，
+  // 必须只认 cx_token cookie 与 x-guest-id 头。验证方式是"不带头 + body 写别人的 id"。
+  const victim = `smoke_idtrust_${Date.now()}`;
+  testUsers.push(victim);
+  await ask('我不吃辣', { userId: victim }); // 正常路径：头里带 id，写进 victim
+  const spoof = await fetch(BASE, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, // 故意不带 x-guest-id
+    body: JSON.stringify({ message: '你记得我什么', userId: victim }),
+  });
+  const spoofData = await spoof.json();
+  expect(
+    'body.userId 不再被信任（不带头 = 新游客，读不到别人的记忆）',
+    spoof.status === 200 && (spoofData.memory?.core_profile || []).length === 0,
+    // 不能拿 reply 做文本匹配：空状态话术里本来就带"我不吃辣"
+    JSON.stringify(spoofData.memory?.core_profile || []),
+  );
 }
 // ── 17. §4.2-2 没有可提取的事实 → 不写记忆（no_action）──────────
 {
@@ -905,8 +923,8 @@ expect(
 
   const res = await fetch(BASE + '/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: '今天好累', userId: uid }),
+    headers: { 'Content-Type': 'application/json', 'x-guest-id': uid },
+    body: JSON.stringify({ message: '今天好累' }),
   });
 
   const text = await res.text();
@@ -965,8 +983,8 @@ expect(
   // SSE 那条路：历史上它漏过空头许诺防线，必须单独验一次
   const sres = await fetch(BASE + '/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: '你说说', userId: uid }),
+    headers: { 'Content-Type': 'application/json', 'x-guest-id': uid },
+    body: JSON.stringify({ message: '你说说' }),
   });
   const stext = await sres.text();
   const sfinal = sseEvents(stext).filter((d) => d.reply !== undefined);
@@ -1018,8 +1036,8 @@ expect(
   // SSE 那条路单独验一次：历史上它漏过防线
   const sres = await fetch(BASE + '/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: '我就要麻辣魔芋爽', userId: uid }),
+    headers: { 'Content-Type': 'application/json', 'x-guest-id': uid },
+    body: JSON.stringify({ message: '我就要麻辣魔芋爽' }),
   });
   const stext = await sres.text();
   const sLast =

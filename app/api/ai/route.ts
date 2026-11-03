@@ -65,8 +65,8 @@ interface AiRequestBody {
   /** 上一轮推过的商品名，用来在「换一个」时避开，避免甩同样三款 */
   lastPicks?: string[];
   userProfile?: Record<string, any>;
-  /** 长期记忆的用户标识，前端生成后稳定传回 */
-  userId?: string;
+  // 没有 userId：身份只认 cx_token cookie 与 x-guest-id 头。
+  // 旧客户端若还在 body 里塞，会被原样忽略（读它等于允许自报身份、读别人的记忆）。
 }
 
 export async function POST(req: NextRequest) {
@@ -78,9 +78,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '说点什么呀' }, { status: 400 });
     }
 
-    // 身份：登录态 cookie 优先，其次 x-guest-id 头，最后兼容 body.userId。
+    // 身份：登录态 cookie 优先，其次 x-guest-id 头。**不认 body.userId**（V2.1 已删）。
     // 顺序与判定逻辑只在 lib/auth/identity.ts 一处，流式入口共用同一份。
-    const identity = await resolveIdentity(req, body.userId || body.userProfile?.id);
+    const identity = await resolveIdentity(req);
     const userId = identity.userId;
 
     // 限流：按 userId 计（不按 IP，宿舍/公司共用一个出口，按 IP 会误伤旁人）

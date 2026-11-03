@@ -158,7 +158,11 @@ async function main() {
     const isTest = TEST_USER.test(r.user.id);
     const isGuest = r.user.isGuest;
     if (isTest || isGuest || includeAccounts) {
-      toDelete.push({ ...r, tastes, why: isTest ? '测试残留' : isGuest ? '游客' : '正式账号(显式指定)' });
+      toDelete.push({
+        ...r,
+        tastes,
+        why: isTest ? '测试残留' : isGuest ? '游客' : '正式账号(显式指定)',
+      });
     } else {
       skippedAccount.push({ ...r, tastes });
     }

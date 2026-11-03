@@ -77,7 +77,7 @@ interface StreamBody {
   inRecommendContext?: boolean;
   lastPicks?: string[];
   userProfile?: Record<string, any>;
-  userId?: string;
+  // 没有 userId：身份只认 cookie 与 x-guest-id 头（V2.1 删掉了自报身份的兼容通道）
 }
 
 export async function POST(req: NextRequest) {
@@ -100,7 +100,8 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
     return NextResponse.json({ error: '说点什么呀' }, { status: 400 });
   }
 
-  const identity = await resolveIdentity(req, body.userId || body.userProfile?.id);
+  // **不认 body.userId**（V2.1 已删）：只认 cx_token cookie 与 x-guest-id 头
+  const identity = await resolveIdentity(req);
   const userId = identity.userId;
 
   const limited = checkRateLimit(userId);

@@ -73,6 +73,13 @@ npm run db:backup -- --out=d:/tmp/cx.db   # 指定目标文件（不会被 --kee
 
 `LLM_PROVIDER` 决定主大脑，另一个有 Key 的会自动兜底切换。
 
+V2.0 起还有两个**必须配**的：
+
+| 变量 | 用途 | 缺了会怎样 |
+|---|---|---|
+| `DATABASE_URL` | 长期记忆落 SQLite（`file:../data/cuixiang.db`）。必须写在 `.env`，Prisma CLI 不读 `.env.local` | 直接起不来 |
+| `AUTH_SECRET` | 签 `cx_token` / `cx_guest` 的密钥，≥16 字符（建议 32 位以上随机串） | **签发抛错、校验一律当未登录**：注册/登录全坏，所有人都退回游客态。上云必须配在平台环境变量里 |
+
 ---
 
 ## 一次请求是怎么走的
@@ -81,7 +88,7 @@ npm run db:backup -- --out=d:/tmp/cx.db   # 指定目标文件（不会被 --kee
 flowchart TD
     A([POST /api/ai]) --> B{message 有效?}
     B -- 否 --> B1[400 说点什么呀]
-    B -- 是 --> C[userId 清洗<br/>normalizeUserId]
+    B -- 是 --> C[身份解析<br/>cookie 优先 → x-guest-id 头]
     C --> D[召回长期记忆<br/>recallMemory]
 
     D --> E{记忆意图?<br/>detectMemoryIntent}

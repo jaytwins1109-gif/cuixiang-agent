@@ -988,6 +988,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 
 | 日期 | 改动 | 涉及文件 |
 |---|---|---|
+| 2026-11-03 | **V2.1 收口：删 `body.userId` 兼容通道 + `cx_token` 滑动续期 + 限流持久化评估**：① `resolveIdentity(req)` 去掉 `bodyUserId` 入参与 `'body'` 来源，只认 `cx_token` → `x-guest-id` → 新发 guest；两个 AI 入口、前端两处请求、`AiRequestBody`/`StreamBody` 类型、`trace.identity` 注释、smoke（含 3 处手工 SSE fetch 还在用旧通道）全部对齐，并新增断言"不带头 + body 写别人 id → 读不到记忆"② `/api/auth/me` 里做滑动续期：新增 `userTokenRemaining()`（与 `verifyUserToken` 同口径，含 `typ` 校验），剩余寿命 < `TOKEN_MAX_AGE/2` 才重签并 `Set-Cookie`；实测剩 1 天续期、剩 20 天不续 ③ 限流持久化**评估后不做**（单实例 + 重启窗口数秒 + SQLite 写放大），结论写进 §10.4。顺带修正旧记录：`cx_token` 一直是 **30 天**，不是 7 天 | `lib/auth/identity.ts` / `lib/auth/jwt.ts` / `app/api/auth/me/route.ts` / 两个 AI 入口 / `app/page.tsx` / `lib/chat/trace.ts` / `scripts/smoke.mjs` / `README.md` / 本文件 §10 |
 | 2026-11-03 | **全量回归时修掉三处（放宽丢 exclude / 意图纠偏只做了 SSE / 忌口与辣味回声打架）**：跑 137 条 smoke 时逐条查红项，三条都不是"新功能写错"，而是**既有支路的死角**：① 候选不足 3 款时的放宽补位 `hardFilter(PRODUCTS, need, [])` 把 `exclude` 一起丢了 → 用户说「换一个」，上一轮那款又被补回来；改成传 `exclude`（为空时行为不变）② **普通接口 `/api/ai` 一直缺 SSE 那两段意图纠偏**（`upgradeForUrge` 催货升级、`chat + allowRecommend` → recommend），模型偶发把「来点吃的」判成 introduce/chat 时，普通接口就回一句"我没太听懂"或陪聊一句了事，一张卡都没有；顺带把 introduce 抠不出商品名的死路改成"先看用户在不在要货"③ `buildNeed` 的改口让路只看 `taste` 太宽——`prefs.flavor` 是模型照 history 抄来的回声，用户这轮说的可能是「还是不想吃辣」，于是忌口被误删；改成按**本轮原话**（`avoidTagsFromText(message)`）二选一互斥：说忌辣就剔 `taste` 里的回声，说要辣才让 `avoid` 让路。`reco-guard` 新增 4 条把这三句口语钉死 | `lib/llm/local-workflow.ts` / `app/api/ai/route.ts` / `scripts/reco-guard.ts` / 本文件 §7 |
 | 2026-11-03 | **V1.5 四条防线修复（幻影忌口 / 冲突闭环 / 指鹿为马 / 「条件刁钻」）**：先查了提交与 diff —— V2.0 第 2 步 `236240b` 只换存储层（`decideMemoryAction` 是纯函数，注释明写"迁库时刻意一行没动"），第 3 步 `0fa32b1` 对 `handlers.ts` 只搬走 `normalizeUserId` 并 re-export，**均未改语义**；`local-workflow.ts` / `reply-composer.ts` / `patterns.ts` 自 `ae6a4ce` 起没动过。四条现场全部本地复现，根因都在 V1.5：① `NO_SPICY_PATTERN` 末尾的裸 `不辣` 把「这些也不辣」抽成 `avoid='不吃辣'` 写进长期记忆（用户越抱怨越吃不到辣）→ 收窄为只认"不辣就行 / 不辣的那种"式点单说法，并新增 `PICK_REFERENCE_PATTERN` + `SPICY_DENIAL_PATTERN`，抱怨句整轮不写记忆（带长期副词除外）② `decideMemoryAction` 的忌口早退用 `facts.find(...)`，把同轮 unshift 到 `facts[0]` 的改口静默吞掉（忌口照写、pending 不挂）→ 只判 `facts[0]` ③ `buildNeed` 里旧忌口与本轮"要辣"同时进 need（`taste=['辣味']` + `avoid=['辣味']`），硬过滤必然 0 候选 → 改口期删掉矛盾的 `avoid`，本轮按用户明说给货 ④ `rank` 无辣度加分、`buildReasons` 用 `spicy>0` 就给微辣款写"冲着你要的辣味挑的"→ 加 `spicyBonus`（中辣 18 / 重辣 14 / 微辣 4），理由门槛提到 `spicy>=2`，微辣改说"只能提个味" ⑤ `needFollowUp(0)` 不再说「条件有点刁钻」，按"被口味卡住 / 其他"分开说人话。测试：`profile-guard` +7、`reco-guard` +6（`verify` **82/82**），`npm run guard` 全过，`smoke` **137/137** | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `scripts/profile-guard.ts` / `scripts/reco-guard.ts` / `系统prompt汇总.md` |
 | 2026-11-03 | **V2.0 鉴权接进前端（只新增了限流与账号区话术，规则本体未动）**：① 流式入口新增 **429 分支**——用服务端返回的 `error` 原话，默认兜底「慢点，一口气说太多了，缓一下再聊」；**不落**「啊？刚卡了一下」那条通用错误，也**不降级重发**（重发正好把限流撞得更死）② 「我的」抽屉新增「账号」区与注册/登录弹窗文案：游客态「你现在是游客，记住的东西只跟着这台浏览器走，清缓存就没了」、注册页「现在记住的忌口、口味都会跟着走，换手机也不丢」、登录页「登录后接着用你原来的记忆，一件不落」；注册走**游客 id 原地升级**（不新建账号），所以这些承诺是真的 ③ 提示词正文、意图正则、记忆抽取**均未改动** | `app/page.tsx` / `app/_components/use-auth.ts`（新增）/ `app/_components/auth-dialog.tsx`（新增） |
@@ -1129,10 +1130,41 @@ GLM_API_KEY / GLM_MODEL
 ORCHESTRATOR / COZE_API_KEY / COZE_WORKFLOW_ID
 DIFY_API_KEY / DIFY_BASE_URL
 ADMIN_PASSWORD_HASH
+AUTH_SECRET          # V2.0 起用户鉴权用，≥16 字符，建议 96 位 hex
+RATE_LIMIT_MAX       # 本地跑 smoke 时配 60，生产不要配
 ```
+
+`.env`（Prisma CLI 只读这个）里必须有 `DATABASE_URL`。
 
 - 编排默认 `local`（本地工作流，不依赖外部服务）；切 `coze` / `dify` 才需要对应的 Key
 - 主大脑没配 Key 时，会自动用备用大脑兜底；两个都没配 → 直接抛「没有可用的大脑」
+- **`AUTH_SECRET` 没配 = 注册/登录全坏**：签发直接抛错，校验一律当未登录（fail-closed，
+  不会静默签一张空密钥的票）。换掉它等于让所有已签发的登录态立刻失效
+
+### 10.3 身份只认 cookie 与请求头（V2.1）
+
+`resolveIdentity(req)` 是「我是谁」的**唯一**判定处，两个 AI 入口共用：
+
+| 优先级 | 来源 | 说明 |
+|---|---|---|
+| 1 | `cx_token` cookie | 已登录，`userId` 以票据 `sub` 为准，请求体里传什么都盖不掉 |
+| 2 | `x-guest-id` 请求头 | 游客主路径，过 `normalizeUserId` 清洗 |
+| 3 | 都没有 | 现发一个 guest id，并补签 `cx_guest`（`/api/auth/upgrade` 要求这张票） |
+
+**没有 `body.userId` 这一档了**：留着等于允许客户端自报身份，谁都能把 body 里的 id 写成别人的、
+读走别人的记忆。V2.0 前端就已经统一发头，这条兼容通道只剩攻击面。
+`scripts/smoke.mjs` 里有断言盯着：不带头 + body 写别人的 id → 读不到任何记忆。
+
+**登录票据滑动续期**：`cx_token` 有效期 30 天，`/api/auth/me` 里剩余寿命过半就重签一张
+（前端每次打开页面都打这个接口，活跃用户永远在被踢之前换好票）。只在过半时续，避免每次刷新都写 `Set-Cookie`。
+
+### 10.4 限流为什么没做持久化
+
+`lib/auth/rate-limit.ts` 是进程内 Map：重启即清零、多实例不共享。评估后**暂时不做**——
+
+- 单实例部署，重启窗口只有几秒，撞库者要恰好卡在窗口内才赚得到
+- SQLite 每次请求写一行是写放大，为这点收益不值得
+- 真要上多实例时，和 Redis 一起做（那才是限流的正确载体）
 
 ---
 

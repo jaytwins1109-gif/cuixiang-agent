@@ -105,7 +105,7 @@ export function traceRequest(
     message: string;
     entry: string;
     userId?: string;
-    /** V2.0：这轮身份从哪来（token / guest-header / body / new-guest），排查串号必备 */
+    /** 这轮身份从哪来（token / guest-header / new-guest），排查串号必备 */
     identity?: string;
   },
 ): void {

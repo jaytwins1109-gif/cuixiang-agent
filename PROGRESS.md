@@ -16,7 +16,7 @@
 | 当前在做 | **V2.0 第 0~7 步已全部提交**（`ad869a9` → `05849bd`）；**V1.5 四条防线修复已完成并通过全量回归**，见 §2 首行（幻影忌口 / 冲突闭环 / 指鹿为马 / 「条件刁钻」） |
 | 最近回归 | `npm run verify` **69/69**、`npm run lint` **0 error 0 warning**、`format:check` **全绿**、`guard` **profile 全过 + reco 21/21**、`next build` **成功**（`✓ Compiled successfully`，7/7 静态页，`/` 首屏 114 kB）；`npm run smoke` **r1 130/130、r2 128/130、r3 130/130**（r2 两条失败都是模型随机会话态：§4 #12「无任何偏好仍追问」与「还是不想吃辣只出 2 张」，与 P1~P3 无关）；浏览器实测：首屏/推荐卡片/刷新读档全正常；**V2.0 第 5 步**：`verify` 69/69、lint 0/0、format 全绿，Edge 实测「游客 → 注册 → 刷新保持登录 → 退出 → 再登录」全过；**第 7 步**：`npm run smoke` **130/130（0 FAIL）**、`verify` 69/69；**V1.5 四条防线修复**：`verify` **82/82**、`guard` profile 42 + reco 28 全过、lint 0/0、`smoke` **137/137**（r1 136/137 是 dev server 冷启动抖动，重跑全绿） |
 | 阻塞 | 无 |
-| 下一步 | V2.0 已收口，下一轮建议从 §3 的 V2.1 候选里挑：① 删掉 `body.userId` 兼容通道（前端已统一发 `x-guest-id`，留着就还有"客户端自报身份"的口子）② `rate-limit.ts` 的内存滑动窗口换成持久化（进程重启即清零，多实例也不共享）③ 会话续期（`cx_token` 7 天到期不续，长用户会被静默踢回游客态） |
+| 下一步 | **准备部署**：V2.0 全链闭环 + V2.1 前三条已办。上云前先配 `AUTH_SECRET`（≥32 位随机串，没有它签发直接抛错）、`DATABASE_URL` 指向持久卷，再跑一遍部署后冒烟（见 §3 #5） |
 | 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8）；`npm run build` 前必须先停 dev server（两者共用 `.next`） |
 
 ---
@@ -78,6 +78,7 @@
 
 | 日期 | 任务 | 结果 | 关键落点 |
 |---|---|---|---|
+| 2026-11-03 | **V2.1 收口①②（删 `body.userId` / `cx_token` 滑动续期）+ ③限流评估** | ① `resolveIdentity(req)` 去掉 `bodyUserId` 入参与 `'body'` 来源，两个 AI 入口、前端两处请求、`AiRequestBody` / `StreamBody` 类型、`trace.identity` 注释、smoke 全部对齐；新增 smoke 断言"不带头 + body 写别人 id → 读不到记忆"（顺带发现 3 处手工 SSE fetch 还在用旧通道，已改头）② `/api/auth/me` 里做滑动续期：`userTokenRemaining()` 取剩余寿命，过半就重签并 `Set-Cookie`；不改 `verifyUserToken` 口径，另加同口径的剩余寿命读取函数。实测：剩 1 天→换票、剩 20 天→不换 ③ 限流持久化**评估后不做**：单实例 + SQLite 写放大，重启窗口仅数秒，随多实例一起上 Redis 再说 | ✅ `verify` 86/86、`lint` 0/0、`smoke` **138/138（0 FAIL）**；顺带修正旧记录里的错误（`cx_token` 其实是 30 天不是 7 天） | `lib/auth/identity.ts` / `lib/auth/jwt.ts` / `app/api/auth/me/route.ts` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `app/page.tsx` / `lib/chat/trace.ts` / `scripts/smoke.mjs` |
 | 2026-11-03 | **全量回归 + 修掉三处支路死角** | 清理数据后跑全量回归，红项逐条查证，**三条都不是本次改动引入，而是既有支路的死角**：① 候选不足 3 款的放宽补位丢了 `exclude`（「换一个」把上一轮那款补回来）② 普通接口 `/api/ai` 缺 SSE 的两段意图纠偏（催货升级、`chat + allowRecommend` → recommend），模型偶发判错时用户要货被回"我没太听懂"③ 我上一版改口让路只看 `taste`，被 `prefs.flavor` 的 history 回声带偏，`还是不想吃辣` 会被误删忌口。三处均已修 + `reco-guard` 补 4 条断言钉死。另：回归途中撞到 dev server 热重载后 `POST /api/ai` 全 404（路由表失效），重启即恢复，**重跑前一律重启 dev 并预热两条路由** | ✅ `verify` **86/86**、`guard` profile 42 + reco 31 全过、`lint` 0/0、`smoke` **137/137（0 FAIL）**；中间 5 轮 smoke 的失败项逐条定位（c1 36 条=路由 404、c2/c3/c4 各 1~2 条=模型空返回/意图误判+上述死角） | `lib/llm/local-workflow.ts` / `app/api/ai/route.ts` / `scripts/reco-guard.ts` / `系统prompt汇总.md` §7 §8 |
 | 2026-11-03 | **清理幽灵忌口（一次性数据修复）** | 代码修好只保证"不再写脏"，**库里已有的脏记录不会自己消失**。新增 `scripts/clean-dirty-avoid.mjs`：只认结构证据——① `category='过敏忌口'` 且 content 命中**已知过敏原**（花生/坚果/海鲜/乳制品/鸡蛋/小麦/大豆/芒果）→ **永远保留**，真实过敏误删就是安全事故 ② content 是**口味**（辣/酸/甜/苦/咸）却挂在过敏分类下 → 幽灵（人不"过敏"于辣），默认只清游客与 `smoke_/probe_/test_` 测试号，正式账号要 `--include-accounts` ③ 归不了类的只报告 ④ 删除走软删除、`--apply` 前先归档。**注意 `source` 只存「对话提取」，库里没有原始用户消息，所以不猜"这句话是不是用户说的"，只认分类错挂** | ✅ 扫 82 用户 / 93 条记忆，忌口 78 条（active 69）：软删 **44** 条「过敏忌口·不吃辣」，真过敏原 **25** 条一条未动（active 69 → 25）；归档 `data/dirty-avoid-2026-11-03-13-58-24.json`（44 条，已核对全为「不吃辣」）；**复扫 0 条**（幂等），回滚 id 清单在归档里 | `scripts/clean-dirty-avoid.mjs`（新增） |
 | 2026-11-03 | **V1.5 四条防线修复（幻影忌口 / 冲突闭环 / 指鹿为马 / 「条件刁钻」）** | **先查证再动手**：`git log --name-only` + `git diff` 确认 —— V2.0 第 2 步 `236240b` 只换存储（`decideMemoryAction` 是纯函数，注释明写"迁库时刻意一行没动"），第 3 步 `0fa32b1` 对 `handlers.ts` 只搬走 `normalizeUserId` 并 re-export，`local-workflow.ts` / `reply-composer.ts` / `patterns.ts` 自 `ae6a4ce` 起没动过 → **不是 V2.0 改坏的，是 V1.5 遗留**。四条现场全部本地复现后修复：① 裸 `不辣` 把「这些也不辣」抽成 `avoid='不吃辣'` 写进长期记忆 → `NO_SPICY_PATTERN` 收窄 + `PICK_REFERENCE_PATTERN`/`SPICY_DENIAL_PATTERN` 让抱怨句整轮不写记忆 ② `decideMemoryAction` 忌口早退 `facts.find(...)` 吞掉同轮改口 → 只判 `facts[0]` ③ `buildNeed` 同时产出 `taste=['辣味']`+`avoid=['辣味']` → 改口期删矛盾项 ④ `rank` 无辣度加分、`buildReasons` 用 `spicy>0` 就给微辣款写"冲着你要的辣味"→ `spicyBonus` + 门槛 `spicy>=2` ⑤ `needFollowUp(0)` 不再说「条件刁钻」 | ✅ 复现脚本四条全中→修后全绿；`profile-guard` 42 条（+7）、`reco-guard` 28 条（+6），`npm run guard` 全过、`verify` **82/82**、lint 0/0、`smoke` **137/137（r1 136/137 是 dev server 冷启动抖动，r2 全绿）** | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `scripts/{profile,reco}-guard.ts` / `系统prompt汇总.md` §4.4 §7 §8 |
@@ -118,14 +119,15 @@
 
 ## 3. 下一步待办（Next）
 
-2026-11-03 **V2.0 已收口**：第 0~7 步全部完成，`smoke 130/130`。下面是 V2.1 候选（按建议顺序）与 V1.0 遗留：
+2026-11-03 **V2.0 已收口**：第 0~7 步全部完成，`smoke 138/138`。V2.1 前三条已办（见 §2），下表只剩未做的：
 
 | # | 待办 | 为什么（出处） | 优先级 |
 |---|---|---|---|
-| 1 | 删掉 `body.userId` 兼容通道 | 前端已统一发 `x-guest-id` + cookie，留着这条就等于"客户端仍可自报身份"，`resolveIdentity` 那段兜底也少一个分支要维护 | 高 |
-| 2 | `rate-limit.ts` 换持久化（Redis / 表） | 现在是进程内 Map：重启即清零，多实例不共享，限流形同建议 | 中 |
-| 3 | `cx_token` 续期 | 有效期 7 天，到期直接掉回游客态（记忆还在，但用户会觉得"被登出"了） | 中 |
+| ~~1~~ | ~~删掉 `body.userId` 兼容通道~~ | ✅ 已删：`resolveIdentity(req)` 只认 `cx_token` / `x-guest-id`；smoke 补了"不带头 + body 写别人 id 读不到记忆"的断言 | 已完成 |
+| ~~2~~ | ~~`rate-limit.ts` 换持久化~~ | **决定不做**：单实例部署 + SQLite 每分钟写放大，收益不抵成本；进程重启窗口只有几秒，撞库者要恰好卡在窗口内才赚。真要上多实例时随 Redis 一起做（`lib/auth/rate-limit.ts` 顶部注释已写明） | 搁置 |
+| ~~3~~ | ~~`cx_token` 续期~~ | ✅ 已做：票期 30 天（不是 7 天，旧记录写错了），`/api/auth/me` 里寿命过半就换新票；实测"剩 1 天→续期、剩 20 天→不续" | 已完成 |
 | 4 | 登录失败也记一条审计 | 现在只统一话术防枚举，没有任何"有人在撞库"的观测手段 | 低 |
+| 5 | 部署前必配 `AUTH_SECRET` | 没配（或短于 16 字符）时**签发会抛错、校验一律当未登录**：本地 dev 靠 `.env.local` 里那份，上云必须在平台环境变量里配一份 32 位以上随机串 | 高（部署前置） |
 
 V1.0 遗留（优先级更低）：
 

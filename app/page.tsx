@@ -285,7 +285,7 @@ export default function Page() {
         method: 'POST',
         headers: requestHeaders(),
         credentials: 'same-origin',
-        body: JSON.stringify({ message: text, userId: auth.userId }),
+        body: JSON.stringify({ message: text }),
       });
       applyMemoryPayload(await res.json());
     } catch {
@@ -559,9 +559,7 @@ export default function Page() {
         .slice(-10)
         .map((m) => ({ role: m.role, content: m.content })),
       filters,
-      // 长期记忆挂在固定用户上，刷新/重开浏览器都还是同一个人；
-      // 登录后以 cookie 为准，这里的值只是兼容期的兜底
-      userId: auth.userId,
+      // 身份只走 cookie 与 x-guest-id 头（见 requestHeaders）：V2.1 起服务端不再读 body.userId
       inRecommendContext: recommendCtx.current,
       // 长期偏好（忌口/口味/场景）随请求带上，后端据此过滤推荐
       userProfile: profile,

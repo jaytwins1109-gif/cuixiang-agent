@@ -67,6 +67,27 @@ async function verify(token: string | undefined | null, kind: 'user' | 'guest') 
 
 export const signUserToken = (userId: string) => sign('user', userId, TOKEN_MAX_AGE);
 export const verifyUserToken = (token?: string | null) => verify(token, 'user');
+
+/**
+ * 登录票据的剩余寿命（秒），无效/过期返回 null。
+ *
+ * 只给"滑动续期"用：`verifyUserToken` 只回 id，判断"要不要换新票"需要 exp。
+ * 校验口径与 `verify` 完全一致（含 typ），别另写一份——两处松紧不同就是伪造票据的口子。
+ */
+export async function userTokenRemaining(token?: string | null): Promise<number | null> {
+  if (!token) return null;
+  const key = verifyKey();
+  if (!key) return null;
+  try {
+    const { payload } = await jwtVerify(token, key, { issuer: ISSUER });
+    if (payload.typ !== 'user') return null;
+    if (typeof payload.sub !== 'string' || !payload.sub) return null;
+    const exp = typeof payload.exp === 'number' ? payload.exp : 0;
+    return Math.max(0, exp - Math.floor(Date.now() / 1000));
+  } catch {
+    return null;
+  }
+}
 export const signGuestTicket = (guestId: string) => sign('guest', guestId, GUEST_MAX_AGE);
 export const verifyGuestTicket = (token?: string | null) => verify(token, 'guest');
 
