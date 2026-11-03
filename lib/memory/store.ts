@@ -399,6 +399,37 @@ export async function supersedeMemory(
 }
 
 /**
+ * 同维度互斥：忌口落到某个口味轴上时，把这个轴上的旧口味偏好全部作废。
+ *
+ * 事故原型（2026-11-03）：用户说「不想吃辣了，想吃甜的」，忌口照写，
+ * 但旧的「口味·辣味」没有任何人去动——侧栏两条对立标签并排挂着，
+ * 下一轮 `buildNeed` 同时吃到 avoid=辣 和 taste=辣，推荐精神分裂。
+ *
+ * 为什么不用 `supersedeMemory(userId, axis)`：它按 keyword/content **包含**匹配，
+ * 「不吃辣」本身就含"辣"，会把刚写进去的忌口自己也标失效。
+ * 所以这里限定 `polarity='喜欢'`——只动口味偏好，忌口 / 过敏原一条不碰。
+ *
+ * 轴从忌口原话里抠（"不吃辣"→辣）；过敏原（花生/坚果/海鲜/乳制品）不含口味轴字，
+ * 天然返回空串不触发——真实过敏记录永远不会被这个函数碰到。
+ */
+export async function supersedeTasteConflicts(userId: string, axis: string): Promise<number> {
+  if (!axis) return 0;
+  const rows = await prisma.memory.findMany({
+    where: { userId, status: 'active', polarity: '喜欢' },
+    select: { id: true, keyword: true, content: true },
+  });
+  const doomed = rows
+    .filter((r) => r.keyword.includes(axis) || r.content.includes(axis))
+    .map((r) => r.id);
+  if (!doomed.length) return 0;
+  await prisma.memory.updateMany({
+    where: { id: { in: doomed } },
+    data: { status: 'superseded' },
+  });
+  return doomed.length;
+}
+
+/**
  * 记忆比较与冲突识别：本地版 148919 节点。
  * 规则顺序沿用工作流提示词，最要紧的两条：
  *   1. 过敏 / 明确忌口是高优先级，遇到就直接写，不走确认

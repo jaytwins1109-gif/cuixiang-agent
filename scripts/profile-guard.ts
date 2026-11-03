@@ -21,6 +21,8 @@ import {
   cleanProfile,
   extractMemoryKeyword,
   factsFromMessage,
+  avoidAxisOf,
+  apologizeForMissedScene,
 } from '@/lib/chat/handlers';
 import { extractPrefsFromText } from '@/lib/llm';
 import { avoidTagsFromText, budgetFromText } from '@/lib/llm/local-workflow';
@@ -253,6 +255,72 @@ export function runProfileGuard(): GuardResult[] {
       memAvoid,
     ).decision,
   );
+
+  // ── 改口味连环（2026-11-03 截图现场）：同维度互斥 ──────────────
+  // 用户「不想吃辣了，想吃甜的」→ 忌口落库时旧口味必须被作废；
+  // 以前 syncMemory 只写不管，侧栏「口味·辣味」「忌口·不吃辣」并排挂着。
+  {
+    const memTaste: RecalledMemory = {
+      ...emptyMemory,
+      core_profile: ['口味：辣=喜欢辣'],
+    };
+    // 互斥钥匙：忌口原话 → 口味轴
+    report(avoidAxisOf('不吃辣') === '辣', 'avoidAxisOf("不吃辣") = 辣', avoidAxisOf('不吃辣'));
+    report(avoidAxisOf('不吃甜') === '甜', 'avoidAxisOf("不吃甜") = 甜', avoidAxisOf('不吃甜'));
+    report(
+      avoidAxisOf('花生过敏') === '' && avoidAxisOf('海鲜过敏') === '',
+      '过敏原不含口味轴 → 不触发互斥（真实过敏记录绝不能被误伤）',
+      `花生=${avoidAxisOf('花生过敏')} 海鲜=${avoidAxisOf('海鲜过敏')}`,
+    );
+
+    // 改口味轮的事实与决策：忌口是唯一事实，直接写（用户明说的作废，不用确认）
+    const pivotFacts = factsFromMessage(
+      '不想吃辣了，想吃甜的',
+      { avoid: '不吃辣', flavor: '甜味' },
+      memTaste,
+    );
+    report(
+      pivotFacts.length === 1 &&
+        pivotFacts[0].category === '过敏忌口' &&
+        pivotFacts[0].polarity === '拒绝',
+      '「不想吃辣了，想吃甜的」抽出忌口事实（不误抽口味）',
+      JSON.stringify(pivotFacts),
+    );
+    report(
+      decideMemoryAction(pivotFacts, memTaste).decision === 'new_memory',
+      '改口味轮 → 直接写忌口（不走确认，旧口味由落库侧作废）',
+      decideMemoryAction(pivotFacts, memTaste).decision,
+    );
+
+    // 回给前端的 profile 不能自相矛盾：模型回声把旧口味带回来也要被拦
+    const echoed = pickTrustedProfile('不想吃辣了，想吃甜的', {
+      avoid: '不吃辣',
+      flavor: '辣味', // 模型从 history 里抄回来的旧口味
+    });
+    report(
+      echoed.flavor === '甜味' || !echoed.flavor,
+      '忌口在场时回包口味与忌口同轴 → 拦掉模型回声',
+      JSON.stringify(echoed),
+    );
+
+    // 场景抱怨的找补：先认错，不机械重问
+    report(
+      apologizeForMissedScene('场景呢？刚说了', '你现在是躺着刷手机吗？').startsWith('我的锅'),
+      '抱怨场景 → 追问前先认错',
+      apologizeForMissedScene('场景呢？刚说了', '你现在是躺着刷手机吗？'),
+    );
+    report(
+      apologizeForMissedScene('场景呢？刚说了', '我的锅，刚没顾上问——你现在在哪？') ===
+        '我的锅，刚没顾上问——你现在在哪？',
+      '模型自己已认错 → 不重复垫话',
+      apologizeForMissedScene('场景呢？刚说了', '我的锅，刚没顾上问——你现在在哪？'),
+    );
+    report(
+      apologizeForMissedScene('来点甜的', '好嘞') === '好嘞',
+      '没抱怨场景 → 原样放行',
+      apologizeForMissedScene('来点甜的', '好嘞'),
+    );
+  }
 
   return results;
 }

@@ -63,6 +63,7 @@ import {
   runLocalBrain,
   syncMemory,
   cleanProfile,
+  apologizeForMissedScene,
   snapshot,
   pickTransition,
   withPendingQuestion,
@@ -332,7 +333,10 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
             ctx,
           );
           const reply = guardReply(
-            withPendingQuestion(stripFakeList(fixed, traceId) || UNCLEAR_REPLY, mem.question),
+            apologizeForMissedScene(
+              body.message,
+              withPendingQuestion(stripFakeList(fixed, traceId) || UNCLEAR_REPLY, mem.question),
+            ),
             memory,
             traceId,
           );

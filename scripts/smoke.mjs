@@ -593,6 +593,53 @@ expect(
   );
 }
 
+// ── 14b. 改口味连环（2026-11-03 截图现场）─────────────
+// 「不想吃辣了，想吃甜的」：忌口入库 → 旧口味同轴作废 → 追问场景；
+// 之后再要辣 → 挂待确认；确认 → 旧忌口被顶掉。侧栏不允许出现对立标签。
+{
+  const uid = `smoke_pivot_${Date.now()}`;
+  testUsers.push(uid);
+  const askAs = (m) => ask(m, { userId: uid });
+  const core = (r) => r.data.memory?.core_profile || [];
+
+  await askAs('我平时都喜欢吃辣的');
+  const pivot = await askAs('不想吃辣了，想吃甜的');
+  expect(
+    '改口味 → 追问场景，不出卡片',
+    (pivot.data.recommendations || []).length === 0 && /场合|场景/.test(pivot.data.reply || ''),
+    `${(pivot.data.recommendations || []).length}张 / ${pivot.data.reply}`,
+  );
+  expect(
+    '改口味 → 忌口入库且旧口味被作废（同轴互斥）',
+    core(pivot).some((t) => t.includes('不吃辣')) &&
+      !core(pivot).some((t) => t.includes('辣') && !t.includes('不吃辣') && !t.includes('忌口')),
+    JSON.stringify(core(pivot)),
+  );
+
+  const withScene = await askAs('加班时来点甜的');
+  expect(
+    '补上场景 → 正常出甜卡',
+    (withScene.data.recommendations || []).length === 3,
+    `${(withScene.data.recommendations || []).length}张 / ${withScene.data.reply}`,
+  );
+
+  const wantSpicy = await askAs('我想吃辣的');
+  expect(
+    '要辣撞忌口 → 挂待确认（追问改口，不静默覆盖）',
+    /改口/.test(wantSpicy.data.reply || ''),
+    wantSpicy.data.reply,
+  );
+
+  await askAs('对');
+  const settled = await askAs('你记得我什么');
+  expect(
+    '确认改口 → 旧忌口被顶掉、辣口味生效',
+    !core(settled).some((t) => t.includes('不吃辣')) &&
+      core(settled).some((t) => t.includes('辣') && !t.includes('不吃辣')),
+    JSON.stringify(core(settled)),
+  );
+}
+
 // ── 13. 待确认闭环：直接往库里种一条 pending，再来一句答复 ──────
 // Pending closure: seed a pending record straight into the DB,
 // then answer it. Deterministic -- no dependence on how the model phrases things.

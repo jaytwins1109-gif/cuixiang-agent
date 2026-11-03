@@ -24,6 +24,7 @@ import {
   NIGHT_PATTERN,
   PICK_REFERENCE_PATTERN,
   RETRACTION_PATTERN,
+  SCENE_COMPLAINT_PATTERN,
   SPICY_DENIAL_PATTERN,
 } from '@/lib/rules/patterns';
 import type { ChatMessage, Filters } from '@/lib/llm';
@@ -61,6 +62,7 @@ import {
   clearMemory,
   decideMemoryAction,
   resolvePending,
+  supersedeTasteConflicts,
   type MemoryFact,
   type RecalledMemory,
 } from '@/lib/memory/store';
@@ -148,6 +150,12 @@ export function pickTrustedProfile(
     }
     out[k] = value;
   }
+  // 同维度互斥（2026-11-03）：avoid 与 flavor 撞上同一个口味轴 → 忌口赢。
+  // 平时 extractPrefsFromText 已保证单句内不冲突，但模型回声（mergedPrefs 里
+  // 模型那份覆盖本地）可能把旧口味带回来——回给前端的标签不能自相矛盾。
+  // 过敏原不含轴字，不受影响。
+  const avoidAxis = avoidAxisOf(out.avoid || '');
+  if (avoidAxis && avoidAxisOf(out.flavor || '') === avoidAxis) delete out.flavor;
   return out;
 }
 
@@ -829,6 +837,22 @@ const TASTE_AXIS: Record<string, string> = {
 };
 
 /**
+ * 从忌口原话里抠出口味轴（"不吃辣" → "辣"）。
+ *
+ * 同维度互斥的钥匙：忌口落到轴 X 上，X 轴上的旧口味偏好就该作废
+ * （「不想吃辣了」之后，"口味·辣味"不能继续挂着）。
+ * 过敏原（花生/坚果/海鲜/乳制品）不含任何轴字 → 返回空串，
+ * 调用方据此跳过，真实过敏记录永远不会被互斥逻辑碰到。
+ */
+export function avoidAxisOf(avoidText: string): string {
+  const t = avoidText || '';
+  for (const axis of Object.values(TASTE_AXIS)) {
+    if (t.includes(axis)) return axis;
+  }
+  return '';
+}
+
+/**
  * 本轮能写成长期记忆的事实。
  * 只记明确、长期的表达：忌口过敏一定记；"我平时都喜欢吃辣"这种带长期副词的才记口味，
  * 一次性的"来点辣的"不能污染长期偏好（工作流规则：不要把一次性需求推断成偏好）。
@@ -991,6 +1015,16 @@ export async function syncMemory(
         status: 'active',
       },
     ]);
+    // 同维度互斥（2026-11-03）：忌口落库的同一瞬间，把这个口味轴上的旧偏好作废。
+    // 以前只写不管——「不想吃辣了，想吃甜的」之后口味·辣味还挂着，
+    // 侧栏两条对立标签并排，下一轮推荐同时吃到两个相反的约束。
+    // 注意方向：忌口 → 口味是用户本轮明说的作废（直接办）；
+    // 口味 → 忌口绝不能走这里（过敏是死命令，改口必须走 pending 确认）。
+    if (fact.polarity === '拒绝') {
+      const axis = avoidAxisOf(`${fact.key}${fact.value}`);
+      const n = await supersedeTasteConflicts(userId, axis);
+      if (n > 0) traceLocal(traceId, `同维度互斥:${axis}`, `忌口写入 → 作废 ${n} 条旧口味偏好`);
+    }
     return { question: null };
   }
 
@@ -1012,6 +1046,19 @@ export async function syncMemory(
   }
 
   return { question: null };
+}
+
+/**
+ * 场景抱怨的找补（2026-11-03）：用户说「场景呢？刚说了」，说明我们漏接了。
+ * 模型在陪聊支路通常会自己找补，但它也可能只机械地重新提问。
+ * 这里在回给用户前垫一句认错——前提是模型自己没认（已经说了"忘了/抱歉"就不重复垫）。
+ * 两个 AI 入口都要接（口径分叉的亏吃过不止一次）。
+ */
+export function apologizeForMissedScene(message: string, reply: string): string {
+  if (!SCENE_COMPLAINT_PATTERN.test(message || '')) return reply;
+  if (!reply) return reply;
+  if (/我的锅|抱歉|对不起|忘了问|是我没(接住|问)/.test(reply)) return reply;
+  return `我的锅，忘了问你在哪儿吃——${reply}`;
 }
 
 /**

@@ -303,6 +303,44 @@ export function runRecoGuard(): GuardResult[] {
     );
   }
 
+  // ── 10. 改口味轮：追问场景 + 找补话术（2026-11-03 截图现场）──────
+  // 「不想吃辣了，想吃甜的」开了新一轮零食时刻，几轮前的「办公室」不再成立——
+  // 拿历史场景当约束直接甩卡片，用户就会问「场景呢？」
+  setSection('【推荐】改口味追问场景 / 场景抱怨找补');
+  {
+    const pivot = run('不想吃辣了，想吃甜的', { flavor: '甜味', scene: '办公室', avoid: '不吃辣' });
+    report(
+      pivot.recommendations.length === 0 && !!pivot.follow_up && /场合|场景/.test(pivot.follow_up),
+      '改口味 + 场景是几轮前的 → 追问场景不出卡',
+      pivot.follow_up || `直接出了 ${pivot.recommendations.length} 张`,
+    );
+
+    const pivotWithScene = run('不想吃辣了，想吃甜的，加班垫肚子', {
+      flavor: '甜味',
+      scene: '加班',
+      avoid: '不吃辣',
+    });
+    report(
+      pivotWithScene.recommendations.length > 0,
+      '改口味但本轮说了场景 → 正常出卡',
+      `${pivotWithScene.recommendations.length} 张`,
+    );
+
+    const plainWant = run('我想吃辣的', { flavor: '辣味' });
+    report(
+      plainWant.recommendations.length > 0,
+      '普通要口味（非改口）→ 不被误伤，照常出卡',
+      `${plainWant.recommendations.length} 张`,
+    );
+
+    const complaint = run('场景呢？刚说了');
+    report(
+      !!complaint.follow_up && complaint.follow_up.includes('我的锅'),
+      '用户抱怨「场景呢」→ 先认错再收集，不机械重问',
+      complaint.follow_up || `出了 ${complaint.recommendations.length} 张`,
+    );
+  }
+
   return results;
 }
 

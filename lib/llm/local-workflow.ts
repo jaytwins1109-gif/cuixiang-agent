@@ -13,7 +13,11 @@
 //
 // 排序权重沿用工作流第五节：需求匹配 35 / 优惠 20 / 质量 15 / 转化 10 / 毛利 10 / 库存 5 / 售后 5
 
-import { VAGUE_EAT_PATTERN } from '@/lib/rules/patterns';
+import {
+  SCENE_COMPLAINT_PATTERN,
+  TASTE_PIVOT_PATTERN,
+  VAGUE_EAT_PATTERN,
+} from '@/lib/rules/patterns';
 import type { Preferences, Filters } from '@/lib/llm';
 import { PRODUCTS, type Product } from '@/lib/data/snacks';
 import { pricePlan, getMember, describePlan, type PricePlan } from '@/lib/data/promos';
@@ -679,6 +683,12 @@ export function recommendIntake(
 ): string | undefined {
   if (input.inRecommendContext) return undefined;
 
+  // 用户在抱怨我们没接住场景（「场景呢？刚说了」）→ 先认错再重新收集，
+  // 机械地抛一道标准追问等于火上浇油（2026-11-03 截图现场）
+  if (SCENE_COMPLAINT_PATTERN.test(input.message || '')) {
+    return '我的锅，忘了问你在哪儿吃——现在是上班垫肚子、追剧解馋还是出门带着？';
+  }
+
   if (need.gift_need && !need.people.some((x) => x !== '自己'))
     return '这份是送谁呀？我按对象挑包装';
   if (need.people.some((x) => /孩子|孕妇|老人/.test(x)) && !need.avoid_tags.length) {
@@ -689,6 +699,14 @@ export function recommendIntake(
   // 模型有时会从情绪脑补出口感（"烦"→嚼感），那是推测不是约束
   const statedInMessage = (vals: string[]) =>
     vals.some((v) => !!v && !!input.message && input.message.includes(v));
+
+  // 改口味（「不想吃辣了，想吃甜的」「换成甜的」）= 开一轮新的零食时刻：
+  // 历史场景是上一个时刻的语境，改口之后多半不成立，必须本轮重新说。
+  // 拿几轮前的"办公室"当这轮的约束直接甩卡片，用户就会问「场景呢？」
+  const pivot = TASTE_PIVOT_PATTERN.test(input.message || '');
+  if (pivot && !statedInMessage([need.scene])) {
+    return '换口味啦——这次是什么场合吃？上班垫肚子、追剧解馋还是出门带着？';
+  }
 
   // 模糊请求下，旧场景不算数：必须本轮自己提到（"看海配点零食"才是有效场景约束），
   // 否则几轮前聊过"上班"，这轮一句"想吃点啥"就会被当成"信息够了"直接推

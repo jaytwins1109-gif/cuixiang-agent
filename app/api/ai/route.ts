@@ -48,6 +48,7 @@ import {
   runLocalBrain,
   syncMemory,
   cleanProfile,
+  apologizeForMissedScene,
   snapshot,
   pickTransition,
   withPendingQuestion,
@@ -273,7 +274,10 @@ async function handleTurn({
     // 陪聊轮没有卡片，模型却自己编了"1. XX｜X元"的清单 → 截掉，只留安抚语
     const stripped = stripFakeList(brainRes.reply?.trim() || '', traceId);
     const chatReply = guardReply(
-      withPendingQuestion(stripped || UNCLEAR_REPLY, mem.question),
+      apologizeForMissedScene(
+        body.message,
+        withPendingQuestion(stripped || UNCLEAR_REPLY, mem.question),
+      ),
       memory,
       traceId,
     );

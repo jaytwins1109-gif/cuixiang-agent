@@ -660,6 +660,16 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 - **冲突事实优先**：本轮想要的口味（`prefs.flavor`）在记忆里撞上忌口（「不吃辣」vs「想吃辣」；过敏不参与，死命令没有改口）→ 冲突事实 `unshift` 到 facts[0]，交 `decideMemoryAction` 挂待确认。
   该分支**不看**「本轮有没有抽出别的事实」——2026-11-01 的门槛 `!out.length` 把"我平时都喜欢吃辣的"这种真正的改口挡在门外，已废。
   用户本轮亲口重申同一个忌口（`restatedAvoid`）不算改口，不挂待确认
+- **同维度互斥（2026-11-03 补，方向是单向的）**：忌口落库的同一瞬间，`supersedeTasteConflicts(userId, axis)`
+  把该口味轴上的旧 `polarity='喜欢'` 记忆标 superseded——「不想吃辣了，想吃甜的」之后，
+  旧的「口味·辣味」不能继续挂着，否则侧栏两条对立标签并排、推荐同时吃到两个相反约束。
+  实现要点：①轴从忌口原话抠（`avoidAxisOf("不吃辣")="辣"`），**过敏原不含轴字天然不触发**，
+  真实过敏记录永远不会被互斥碰到 ②只动 `polarity='喜欢'` 的行——不能用 `supersedeMemory` 按包含匹配，
+  「不吃辣」含"辣"，会把刚写的忌口自己也废掉
+  **方向只许单向**：忌口→口味是用户本轮明说的作废，直接办；口味→忌口绝不能静默，必须走 pending 确认（过敏是死命令）
+- **`pickTrustedProfile` 回包同轴互斥**：avoid 与 flavor 撞同一轴 → 忌口赢，`flavor` 从回包里删掉。
+  平时 `extractPrefsFromText` 单句内已保证不冲突，但模型回声（mergedPrefs 里模型那份覆盖本地）
+  可能把旧口味带回来——回给前端的标签不能自相矛盾
 
 ### 4.5 待确认闭环（改口后的收尾）
 
@@ -957,6 +967,13 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
   用户明说的话本地抽得到（`extractPrefsFromText`，含 2026-11-01 新补的口感分支），那份照常算数。
 - **场景是例外**：它是临时语境不是持久偏好，模糊请求（`VAGUE_EAT_PATTERN`）下必须本轮自己提到才算数——
   否则几轮前聊过"上班"，这轮一句"想吃点啥"就会被当成"信息够了"直接推
+- **改口味轮场景必须重说（2026-11-03 补）**：`TASTE_PIVOT_PATTERN`（「不想吃辣了，想吃甜的」/「换成甜的」
+  ——否定旧口味 + 点名新口味，或"换/改"词根）命中时，历史场景一律不算数：场景没在本轮原话里出现就追问
+  「换口味啦——这次是什么场合吃？」，**哪怕其它约束齐了也拦**（改口味 = 开新一轮零食时刻，
+  几轮前的"办公室"是上一个时刻的语境）。普通要口味（「我想吃辣的」）不命中 pivot，照常出卡不误伤
+- **场景抱怨先认错（2026-11-03 补）**：`SCENE_COMPLAINT_PATTERN`（「场景呢？刚说了」「怎么不问」）命中时，
+  追问换成「我的锅，忘了问你在哪儿吃——」开头；chat 支路（两个 AI 入口同口径）也会在模型回复前垫这句，
+  模型自己已认错（回复含"锅/抱歉/忘了问"）则不重复垫
 - **长期偏好要真正流进本地工作流**：`runRecommendation` 里模型当轮输出的 `prefs`（空值不覆盖）
   与前端 `userProfile` 合并后才进 `runLocalWorkflow`。以前 `userProfile` 只喂给外部编排器，
   本地工作流看不见，profile 记着口味也照样追问
@@ -988,6 +1005,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 
 | 日期 | 改动 | 涉及文件 |
 |---|---|---|
+| 2026-11-04 | **改口味连环 Bug：同维度互斥 + 改口味追问场景 + 找补话术**：截图现场「不想吃辣了，想吃甜的」暴露三层问题，全部先复现后修——① `syncMemory` 写忌口时对旧口味零信号 → 新增 `supersedeTasteConflicts(userId, axis)`，忌口落库即作废同轴 `polarity='喜欢'` 旧偏好（轴由 `avoidAxisOf` 从忌口原话抠；过敏原不含轴字天然不触发；限定 polarity 是防「不吃辣」按包含匹配把自己也废掉）② `TASTE_PIVOT_PATTERN` 改口味轮历史场景作废，场景必须本轮重说，否则追问「这次是什么场合吃」（普通要口味不误伤）；`SCENE_COMPLAINT_PATTERN` 命中先认错「我的锅，忘了问你在哪儿吃——」，chat 支路两个 AI 入口统一接 `apologizeForMissedScene`，模型已认错则不垫 ③ 前端 `mergeProfileExclusive` 替代裸 spread（口味与忌口同轴互斥，过敏原永不误伤）；`pickTrustedProfile` 回包同轴互斥拦模型回声。**方向单向**：忌口→口味直接办（用户明说），口味→忌口必须 pending 确认。验证：DB 探针 8/8、`verify` **99/99**、guard 全过、lint/format 全绿、`smoke` **150/150**（新增 14b 连环 12 条） | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `app/_components/storage.ts` / `app/page.tsx` / 两个 AI 入口 / `scripts/{profile,reco}-guard.ts` / `scripts/smoke.mjs` / 本文件 §4.4 §7 |
 | 2026-11-03 | **V2.1 收口：删 `body.userId` 兼容通道 + `cx_token` 滑动续期 + 限流持久化评估**：① `resolveIdentity(req)` 去掉 `bodyUserId` 入参与 `'body'` 来源，只认 `cx_token` → `x-guest-id` → 新发 guest；两个 AI 入口、前端两处请求、`AiRequestBody`/`StreamBody` 类型、`trace.identity` 注释、smoke（含 3 处手工 SSE fetch 还在用旧通道）全部对齐，并新增断言"不带头 + body 写别人 id → 读不到记忆"② `/api/auth/me` 里做滑动续期：新增 `userTokenRemaining()`（与 `verifyUserToken` 同口径，含 `typ` 校验），剩余寿命 < `TOKEN_MAX_AGE/2` 才重签并 `Set-Cookie`；实测剩 1 天续期、剩 20 天不续 ③ 限流持久化**评估后不做**（单实例 + 重启窗口数秒 + SQLite 写放大），结论写进 §10.4。顺带修正旧记录：`cx_token` 一直是 **30 天**，不是 7 天 | `lib/auth/identity.ts` / `lib/auth/jwt.ts` / `app/api/auth/me/route.ts` / 两个 AI 入口 / `app/page.tsx` / `lib/chat/trace.ts` / `scripts/smoke.mjs` / `README.md` / 本文件 §10 |
 | 2026-11-03 | **全量回归时修掉三处（放宽丢 exclude / 意图纠偏只做了 SSE / 忌口与辣味回声打架）**：跑 137 条 smoke 时逐条查红项，三条都不是"新功能写错"，而是**既有支路的死角**：① 候选不足 3 款时的放宽补位 `hardFilter(PRODUCTS, need, [])` 把 `exclude` 一起丢了 → 用户说「换一个」，上一轮那款又被补回来；改成传 `exclude`（为空时行为不变）② **普通接口 `/api/ai` 一直缺 SSE 那两段意图纠偏**（`upgradeForUrge` 催货升级、`chat + allowRecommend` → recommend），模型偶发把「来点吃的」判成 introduce/chat 时，普通接口就回一句"我没太听懂"或陪聊一句了事，一张卡都没有；顺带把 introduce 抠不出商品名的死路改成"先看用户在不在要货"③ `buildNeed` 的改口让路只看 `taste` 太宽——`prefs.flavor` 是模型照 history 抄来的回声，用户这轮说的可能是「还是不想吃辣」，于是忌口被误删；改成按**本轮原话**（`avoidTagsFromText(message)`）二选一互斥：说忌辣就剔 `taste` 里的回声，说要辣才让 `avoid` 让路。`reco-guard` 新增 4 条把这三句口语钉死 | `lib/llm/local-workflow.ts` / `app/api/ai/route.ts` / `scripts/reco-guard.ts` / 本文件 §7 |
 | 2026-11-03 | **V1.5 四条防线修复（幻影忌口 / 冲突闭环 / 指鹿为马 / 「条件刁钻」）**：先查了提交与 diff —— V2.0 第 2 步 `236240b` 只换存储层（`decideMemoryAction` 是纯函数，注释明写"迁库时刻意一行没动"），第 3 步 `0fa32b1` 对 `handlers.ts` 只搬走 `normalizeUserId` 并 re-export，**均未改语义**；`local-workflow.ts` / `reply-composer.ts` / `patterns.ts` 自 `ae6a4ce` 起没动过。四条现场全部本地复现，根因都在 V1.5：① `NO_SPICY_PATTERN` 末尾的裸 `不辣` 把「这些也不辣」抽成 `avoid='不吃辣'` 写进长期记忆（用户越抱怨越吃不到辣）→ 收窄为只认"不辣就行 / 不辣的那种"式点单说法，并新增 `PICK_REFERENCE_PATTERN` + `SPICY_DENIAL_PATTERN`，抱怨句整轮不写记忆（带长期副词除外）② `decideMemoryAction` 的忌口早退用 `facts.find(...)`，把同轮 unshift 到 `facts[0]` 的改口静默吞掉（忌口照写、pending 不挂）→ 只判 `facts[0]` ③ `buildNeed` 里旧忌口与本轮"要辣"同时进 need（`taste=['辣味']` + `avoid=['辣味']`），硬过滤必然 0 候选 → 改口期删掉矛盾的 `avoid`，本轮按用户明说给货 ④ `rank` 无辣度加分、`buildReasons` 用 `spicy>0` 就给微辣款写"冲着你要的辣味挑的"→ 加 `spicyBonus`（中辣 18 / 重辣 14 / 微辣 4），理由门槛提到 `spicy>=2`，微辣改说"只能提个味" ⑤ `needFollowUp(0)` 不再说「条件有点刁钻」，按"被口味卡住 / 其他"分开说人话。测试：`profile-guard` +7、`reco-guard` +6（`verify` **82/82**），`npm run guard` 全过，`smoke` **137/137** | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `scripts/profile-guard.ts` / `scripts/reco-guard.ts` / `系统prompt汇总.md` |

@@ -8,7 +8,7 @@ import { FilterPanel } from './_components/filter-panel';
 import { finalPrice } from './_components/format';
 import { NavBtn } from './_components/nav-btn';
 import { SnackCard } from './_components/snack-card';
-import { stripVolatileProfile } from './_components/storage';
+import { mergeProfileExclusive, stripVolatileProfile } from './_components/storage';
 import { applyTheme, readTheme } from './_components/theme';
 import { useAuth } from './_components/use-auth';
 import { ThemeSwitch } from './_components/theme-switch';
@@ -378,7 +378,9 @@ export default function Page() {
     if (data.profile && typeof data.profile === 'object') {
       const incoming = stripVolatileProfile(data.profile);
       if (Object.keys(incoming).length) {
-        setProfile((prev) => ({ ...prev, ...incoming }));
+        // 同维度互斥（2026-11-03）：本轮说了忌口，同轴的旧口味标签要当场让位，
+        // 裸 spread 会把「口味·辣味」和「忌口·不吃辣」并排挂在侧栏
+        setProfile((prev) => mergeProfileExclusive(prev, incoming));
       }
     }
 
