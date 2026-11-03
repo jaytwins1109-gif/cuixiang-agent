@@ -12,12 +12,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最后更新 | 2026-11-03（会话：V1.0 封版 · git / 后台签名 / 记忆备份 + 删除正则 / 气泡明细 → 两条 Bug 复核 → **P1+P2+P3 收口**） |
-| 当前在做 | **无进行中任务**。P0 三件、两个 Bug、P1（lint+单测+format 基线）、P2（`page.tsx` 拆分 + 防抖写盘）、P3（根目录清理）全部完成并验过（见 §2 前三行） |
-| 最近回归 | `npm run verify` **69/69**、`npm run lint` **0 error 0 warning**、`format:check` **全绿**、`guard` **profile 全过 + reco 21/21**；`npm run smoke` **r1 130/130、r2 128/130、r3 130/130**（r2 两条失败都是模型随机会话态：§4 #12「无任何偏好仍追问」与「还是不想吃辣只出 2 张」，与 P1~P3 无关）；浏览器实测：首屏/推荐卡片/刷新读档全正常 |
+| 最后更新 | 2026-11-03（会话：V1.0 封版 · git / 后台签名 / 记忆备份 + 删除正则 / 气泡明细 → 两条 Bug 复核 → **P1+P2+P3 收口 → 生产构建 + 提交**） |
+| 当前在做 | **无进行中任务**。P0 三件、两个 Bug、P1（lint+单测+format 基线）、P2（`page.tsx` 拆分 + 防抖写盘）、P3（根目录清理）全部完成并验过，已分两个 commit 提交（见 §2 首行） |
+| 最近回归 | `npm run verify` **69/69**、`npm run lint` **0 error 0 warning**、`format:check` **全绿**、`guard` **profile 全过 + reco 21/21**、`next build` **成功**（`✓ Compiled successfully`，7/7 静态页，`/` 首屏 114 kB）；`npm run smoke` **r1 130/130、r2 128/130、r3 130/130**（r2 两条失败都是模型随机会话态：§4 #12「无任何偏好仍追问」与「还是不想吃辣只出 2 张」，与 P1~P3 无关）；浏览器实测：首屏/推荐卡片/刷新读档全正常 |
 | 阻塞 | 无 |
-| 下一步 | 待定。可选项：`npm run build` 生产构建复核、`page.tsx` 再拆（还剩 929 行主壳）、`PROGRESS` §4 里两条偶发用例根治（要给"模型当轮填的 category"加出处校验） |
-| 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8） |
+| 下一步 | 待定。可选项：`page.tsx` 再拆（还剩 929 行主壳，要动流式/中止逻辑，风险 > 收益）、§4 #12 两条偶发用例根治（要给"模型当轮填的 category"加出处校验）、给 `eslint.config.mjs` 接 `eslint-config-next` 消掉 build 时那条 "Next.js plugin was not detected" 提示（需新装依赖，本轮刻意没做） |
+| 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8）；`npm run build` 前必须先停 dev server（两者共用 `.next`） |
 
 ---
 
@@ -64,6 +64,7 @@
 
 | 日期 | 任务 | 结果 | 关键落点 |
 |---|---|---|---|
+| 2026-11-03 | **生产构建 + 分两次提交** | ① `npx next build`：先停 dev server（两者共用 `.next`），cmd 前置清空 `CODEBUDDY_*` 身份变量 → `✓ Compiled successfully`，7/7 静态页，`/` 8.78 kB / 首屏 114 kB；唯一提示是 "Next.js plugin was not detected in your ESLint configuration"（没装 `eslint-config-next`，信息级，已记入 §3）② 提交前仓库没配 `user.name/email`（上一条 `3d44c09` 用的是 `Administrator <administrator@localhost>`），按「不改 git config」的规矩用 `-c user.name=… -c user.email=…` 临时带入同一身份 ③ 两个 commit：**`ae6a4ce`** chore（工具链 + 全仓格式化 + 死引用清理）、**`f6268c9`** refactor（`page.tsx` 拆件 + 防抖写盘 + 根目录清理 + 文档同步） | ✅ `git status` 无输出（工作区干净），提交序列 `3d44c09 → ae6a4ce → f6268c9` | `.next` / `build.log` / git |
 | 2026-11-03 | **P1：lint / 单测 / verify 基线** | ① `eslint.config.mjs`（ESLint 9 flat，宽松优先：`no-explicit-any` 关、`no-unused-vars` 降 warn、风格类交 Prettier）② `vitest.config.ts` + `tests/` 3 个文件共 **69 条**（admin 票据 12 / profile-guard 35 / reco-guard 22），断言仍只在 `scripts/*-guard.ts` 写一份，`scripts/guard-types.ts` 的 `GuardResult` 给 CLI 与 vitest 共用 ③ `npm run verify` = `tsc --noEmit && vitest run` ④ 本次补齐：`.prettierrc` 改 `singleQuote: true`（对齐既有代码，避免全仓引号大改）、`.prettierignore` 排除 `*.md`（手写中文表格格式化只制造噪声），`format:check` 从 56 个文件不通过 → **全绿**；删掉搬走后残留的死引用、未用形参改 `_plan` / `_query` / `_reason` 并注明为何保留，`npm run lint` 35 警告 → **0** | ✅ `verify` 69/69；lint 0 error 0 warning；format:check 全绿；全都不需要 dev server | `eslint.config.mjs` / `vitest.config.ts` / `.prettierrc` / `.prettierignore` / `tests/*` / `scripts/guard-types.ts` / `lib/llm/{index,brain-stream,local-workflow}.ts` / `lib/memory/store.ts` |
 | 2026-11-03 | **P2：`page.tsx` 拆件 + localStorage 防抖** | `app/page.tsx` 1672 → **929 行**，拆出 `app/_components/`：`bubble` / `snack-card` / `filter-panel` / `nav-btn` / `theme-switch` / `theme` / `format` / `storage` / `types` / `constants`（`WELCOME`/`SCENES`/`QUICK`/`BUDGETS`/可信 key）/ `use-debounced-write`。写盘从"每次变化同步 setItem"改成 `useDebouncedWrite`（三处：`cx_chat_v1` 400ms、`cx_profile_v1` 与 `cx_want_v1` 300ms），带 `hydrated` 闸门（首帧不许写，否则只有欢迎语的一版覆盖历史）+ `pagehide` / `visibilitychange` / 卸载时 flush（否则最后几百毫秒的改动会丢） | ✅ Edge 实测：首屏 / 侧栏 / 场景卡渲染正常；发「来点不辣的」出 1 条气泡 + 3 张卡（卡上有价、气泡无价无编号）；刷新后 `cx_chat_v1` 仍有 3 条消息，读档没被首帧覆盖。控制台只有 favicon 404（既有，项目本来就没有 favicon） | `app/page.tsx` / `app/_components/*` / `系统prompt汇总.md` §6 / `AGENTS.md` 规则表 / `README.md` |
 | 2026-11-03 | **P3：根目录清理** | 删掉用完的一次性脚本 `probe4.mjs` / `probe5.mjs` / `tmp-timecheck.mjs` / `scripts/_dedupe.mjs`（都无引用）；`mobile-375.png` 移到 `docs/`；删掉 0 字节的 `smoke-p2.txt`。**刻意保留**：`index.html`（`打开脆香.url` 指向它，服务没起时提示双击 `启动.bat`）、`workflow.txt`（README 与代码注释里的 Coze 节点编号对照）、`启动.bat` / `run-server.bat` / `silent-start.vbs` / `开机自启.bat` / `取消开机自启.bat`（用户双击的启动器，挪走就断链）、`cuixiang_prompt.md`（已是指向真源的入口文件） | ✅ 根目录只剩文档 / 启动器 / 配置；tmp 脚本在 git 里显示为 `D`，全仓库无残留引用 | 根目录 / `docs/` / `scripts/` |
@@ -93,14 +94,14 @@
 
 ## 3. 下一步待办（Next）
 
-2026-11-03 **P1 / P2 / P3 全部收口**（见 §2 前三行），原待办表已清空。下面是还值得做但没排期的：
+2026-11-03 **P1 / P2 / P3 全部收口 + 生产构建通过 + 已提交**（见 §2 前两行）。下面是还值得做但没排期的：
 
 | # | 待办 | 为什么（出处） | 优先级 |
 |---|---|---|---|
-| 1 | `npm run build` 生产构建复核 | 本轮只验了 dev server + 浏览器；生产构建会暴露 SSR / 静态化问题（2026-11-03 未跑） | 中 |
-| 2 | `page.tsx` 再拆 | 拆完还剩 929 行主壳（状态 + 发送链路）；继续拆要动流式/中止逻辑，风险高于收益 | 低 |
-| 3 | 两条偶发用例根治 | §4 #12：模型当轮脑补 `category` / 只凑出 2 款，会把"无偏好仍追问""3 张卡"这两条断言撞红 | 中（要拍板才算行为变更） |
-| 4 | 陪聊链路补 `emotion` 抽取 | §4 #9，影响小，只在本地兜底池挑档时用到 | 低 |
+| 1 | `page.tsx` 再拆 | 拆完还剩 929 行主壳（状态 + 发送链路）；继续拆要动流式/中止逻辑，风险高于收益 | 低 |
+| 2 | 两条偶发用例根治 | §4 #12：模型当轮脑补 `category` / 只凑出 2 款，会把"无偏好仍追问""3 张卡"这两条断言撞红 | 中（要拍板才算行为变更） |
+| 3 | 陪聊链路补 `emotion` 抽取 | §4 #9，影响小，只在本地兜底池挑档时用到 | 低 |
+| 4 | 接 `eslint-config-next` | `next build` 会提示 "The Next.js plugin was not detected in your ESLint configuration"；接上要新装依赖，且大概率刷出一批新告警，单独一轮做 | 低 |
 
 历史（2026-11-02 已清空）：移动端触摸目标放大 / 360×640 矮屏复测 / 兜底链路并入长期记忆忌口，三条都验完了，结论见 §2。
 

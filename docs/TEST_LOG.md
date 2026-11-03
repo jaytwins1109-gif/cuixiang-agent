@@ -68,6 +68,7 @@
 | 11-03 15:31 | 工具·静态检查（P1） | 无（命令行） | `npm run verify` **69/69**（admin 票据 12 + profile-guard 35 + reco-guard 22）；`npm run lint` **0 error 0 warning**；`format:check` **全绿** | ✅ | 修前：lint 35 warning、format:check 56 个文件不通过。`.prettierrc` 改 `singleQuote: true`、`.prettierignore` 排除 `*.md`；死引用删掉，未用形参改 `_plan`/`_query`/`_reason` |
 | 11-03 15:48 | 前端·拆分后浏览器实测（P2，Edge） | 「来点不辣的」→ 刷新页面 | 1 条气泡（"行，不辣的来了…⚠ 儿童海苔小片：含海产品…"，**无编号、无价格**）+ 3 张卡（卡上有 ¥ / 省 / 活动）；侧栏「一直记着：忌口·不吃辣」；刷新后 `cx_chat_v1` 仍有 3 条消息 | ✅ | 控制台只有 favicon 404（项目本来没有 favicon）。证明 `useDebouncedWrite` 的 `hydrated` 闸门没让首帧欢迎语覆盖历史 |
 | 11-03 15:52 | 回归·smoke ×3（P2/P3 后） | 全量 130 条 | r1 **130/130**、r2 **128/130**、r3 **130/130** | ⚠️ | r2 两条：①「无任何偏好 → 仍要追问不出卡片」出了 3 张卡 ②「还是不想吃辣」只出 2 张（两款都不辣，行为正确）——都属 `PROGRESS.md` §4 #12 的模型随机会话态，与 P1~P3 无关 |
+| 11-03 16:05 | 构建·生产构建（`npx next build`） | 无（命令行） | `✓ Compiled successfully`；`Generating static pages (7/7)`；路由表 `/` 8.78 kB / 首屏 114 kB，`/admin`、`/api/ai`、`/api/ai/stream` 均为 dynamic | ✅ | 先停 dev server（与 build 共用 `.next`）；cmd 前置清 `CODEBUDDY_*` 变量；唯一提示是 "The Next.js plugin was not detected in your ESLint configuration"（未装 `eslint-config-next`，信息级） |
 | 11-03 15:41 / 15:54 | 回归·环境故障两次 | 同上 | ① r1 在 70 秒处 `TypeError: fetch failed … ECONNRESET`（我在 smoke 跑着的时候改了文档，Next 重编译掐断连接）② 另一轮 dev server 起在 `D:\`（日志出现 `lstat 'D:\System Volume Information'`），`/` 与 `/api/ai` 全 404，smoke 只剩 73/130 | ❌→✅ | 处置：`taskkill /PID <pid> /T /F` 重起，并用 `Start-Process -WorkingDirectory` 显式指定目录；跑 smoke 期间不碰任何文件。已记入 `PROGRESS.md` §4 #19 / #20 |
 
 字段口径（写清楚是为了下一个人能照着复现，不是走过场）：
