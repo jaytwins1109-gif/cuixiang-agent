@@ -84,6 +84,7 @@
 | 本轮先前 | 鉴权·账号被删后的旧票 | 库里删掉该用户后发「你记得我什么」 | 修复前日志 `身份=token`（还在按已删账号认人）；修复后 `me` 清票，再请求 `身份=guest` | ❌→✅ | 否则 `writeMemory` 的 upsert 会把删掉的账号复活 |
 | 21:06 | 脚本·prune（Prisma 版） | 造两个 30 天未活跃用户（游客 1 + 正式账号 1），先试运行再 `--apply` | 默认只列 1 个游客；`--include-accounts` 列 2 个；apply 后**游客行已删**、**账号行保留且记忆 0 条**、`data/memory-archive-20261103.json` 里两条原文都在 | ✅ | `@updatedAt` 由 Prisma 接管，造陈旧数据必须用 `UPDATE` 原始 SQL 拨时间 |
 | 21:07 | 脚本·backup-db（`VACUUM INTO`） | 连跑三次，第三次带 `--keep=1` | 产物 `cuixiang-2026-11-03-13-12-44.db`（52 KB，头部 `SQLite format 3`）；`--keep=1` 清掉 2 份、留最新 1 份 | ✅ | 初版时间戳残留 `T`，清理正则匹配不上 → 保留策略失效，已修 |
+| 21:16 | 回归·smoke 全量（V2.0 收尾） | 全量 130 条（后台跑，`smoke-v2-r1.txt`） | **130/130 通过，0 FAIL** | ✅ | 起 dev server 前必须清空 `NODE_OPTIONS`：safe-delete shim 在中文路径下 `trash` 报 `CanonicalizePath` 失败，进程起来就崩 |
 
 字段口径（写清楚是为了下一个人能照着复现，不是走过场）：
 
