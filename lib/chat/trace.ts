@@ -16,16 +16,16 @@
 //    否则一条推荐回复（含逐款清单）会把日志切成七八行，后半截全成噪声。
 // 2. **只在真的触发时打**：[Local] 是"拦截/兜底"信号，每轮都打等于没有信号。
 
-import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncLocalStorage } from 'node:async_hooks';
 
-const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
+const ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 /** 单条打点进日志前的最大字符数：太长会把同一轮的其它信息挤出可视区 */
 const MAX_LEN = 200;
 
 /** 每请求一个短 ID（6 位，如 a7f3k2）：交错日志里靠它串起同一次对话 */
 export function newTraceId(): string {
-  let out = "";
+  let out = '';
   for (let i = 0; i < 6; i++) {
     out += ID_CHARS[Math.floor(Math.random() * ID_CHARS.length)];
   }
@@ -59,20 +59,16 @@ export function currentTraceId(): string | undefined {
  */
 export function tracePrefix(): string {
   const id = currentTraceId();
-  return id ? `[${id}] ` : "";
+  return id ? `[${id}] ` : '';
 }
 
 /**
  * 报错统一走这里：**stderr 也要带 TraceID**。
  * 电脑重启后翻 dev.err.log，看一眼 TraceID 就能顺藤摸瓜回到那一轮对话。
  */
-export function traceError(
-  stage: string,
-  err: unknown,
-  traceId?: string,
-): void {
+export function traceError(stage: string, err: unknown, traceId?: string): void {
   const id = traceId || currentTraceId();
-  console.error(`[${id || "-"}] [${stage}]`, err);
+  console.error(`[${id || '-'}] [${stage}]`, err);
 }
 
 /**
@@ -80,22 +76,22 @@ export function traceError(
  * 截断是为了让 capture-log 捞出来的表格能一眼看完。
  */
 export function oneLine(text: unknown, max: number = MAX_LEN): string {
-  const s = String(text ?? "")
-    .replace(/\r?\n/g, " ")
-    .replace(/\s+/g, " ")
+  const s = String(text ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
 /** 偏好压缩成 `k=v;k=v`：一轮一个字段一行太占地方，空值不写 */
 export function formatPrefs(prefs?: Record<string, any>): string {
-  if (!prefs) return "（无）";
+  if (!prefs) return '（无）';
   const parts: string[] = [];
   for (const [k, v] of Object.entries(prefs)) {
-    if (v === null || v === undefined || v === "" || v === "null") continue;
+    if (v === null || v === undefined || v === '' || v === 'null') continue;
     parts.push(`${k}=${oneLine(v, 24)}`);
   }
-  return parts.length ? parts.join(";") : "（无）";
+  return parts.length ? parts.join(';') : '（无）';
 }
 
 function emit(traceId: string, stage: string, detail: string): void {
@@ -109,38 +105,26 @@ export function traceRequest(
 ): void {
   emit(
     traceId,
-    "Request",
-    `收到请求，用户输入: ${oneLine(input.message, 120)} | 入口=${input.entry} userId=${input.userId || "-"}`,
+    'Request',
+    `收到请求，用户输入: ${oneLine(input.message, 120)} | 入口=${input.entry} userId=${input.userId || '-'}`,
   );
 }
 
 /** ② 大脑返回意图：模型判成了什么、抽到了哪些偏好 */
-export function traceBrain(
-  traceId: string,
-  intent: string,
-  prefs?: Record<string, any>,
-): void {
-  emit(
-    traceId,
-    "Brain",
-    `模型判定意图: ${intent || "（空）"}, 抽取偏好: ${formatPrefs(prefs)}`,
-  );
+export function traceBrain(traceId: string, intent: string, prefs?: Record<string, any>): void {
+  emit(traceId, 'Brain', `模型判定意图: ${intent || '（空）'}, 抽取偏好: ${formatPrefs(prefs)}`);
 }
 
 /**
  * ③ 本地拦截 / 兜底：**只在真触发时打**。
  * 这是排查时最有用的一行——它说明这一轮不是模型说了算，是本地规则接管了。
  */
-export function traceLocal(
-  traceId: string | undefined,
-  rule: string,
-  handling: string,
-): void {
+export function traceLocal(traceId: string | undefined, rule: string, handling: string): void {
   // 没传就取当前请求的上下文（包在 runWithTrace 里的调用都会自动带上）；
   // 传了以传的为准——降级链路里显式传的那份更可信
   const id = traceId || currentTraceId();
   if (!id) return;
-  emit(id, "Local", `触发拦截规则: ${rule}, 兜底处理: ${oneLine(handling, 120)}`);
+  emit(id, 'Local', `触发拦截规则: ${rule}, 兜底处理: ${oneLine(handling, 120)}`);
 }
 
 /** ④ 返回响应：最终文案 + 卡片数，附带降级/路由，够判断这一轮有没有出货 */
@@ -151,15 +135,15 @@ export function traceResponse(
   extra?: { degraded?: boolean; route?: string; awaiting?: boolean },
 ): void {
   const tail = [
-    `degraded=${extra?.degraded ? "true" : "false"}`,
-    `route=${extra?.route || "-"}`,
-    extra?.awaiting ? "awaiting_prefs=true" : "",
+    `degraded=${extra?.degraded ? 'true' : 'false'}`,
+    `route=${extra?.route || '-'}`,
+    extra?.awaiting ? 'awaiting_prefs=true' : '',
   ]
     .filter(Boolean)
-    .join(" ");
+    .join(' ');
   emit(
     traceId,
-    "Response",
+    'Response',
     `最终返回文案: ${oneLine(reply, 160)}, 推荐卡片数: ${cardCount} | ${tail}`,
   );
 }

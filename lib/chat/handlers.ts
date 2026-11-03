@@ -14,6 +14,7 @@ import {
   MEMORY_CLEAR_PATTERN,
   MEMORY_DELETE_PATTERN,
   MEMORY_KEYWORD_PATTERN,
+  MEMORY_LIKE_PATTERN,
   PENDING_YES_PATTERN,
   PENDING_NO_PATTERN,
   QUALIFIED_ANSWER_PATTERN,
@@ -22,8 +23,8 @@ import {
   INTRODUCE_PATTERN,
   NIGHT_PATTERN,
   RETRACTION_PATTERN,
-} from "@/lib/rules/patterns";
-import type { ChatMessage, Filters } from "@/lib/llm";
+} from '@/lib/rules/patterns';
+import type { ChatMessage, Filters } from '@/lib/llm';
 import {
   allowRecommend,
   extractPrefsFromText,
@@ -31,10 +32,10 @@ import {
   recentUserText,
   pickCompanionReply,
   logDegraded,
-} from "@/lib/llm";
-import { composeRecommendReply } from "@/lib/llm/reply-composer";
-import { timeContext } from "@/lib/llm/time-context";
-import { traceLocal, tracePrefix } from "@/lib/chat/trace";
+} from '@/lib/llm';
+import { composeRecommendReply } from '@/lib/llm/reply-composer';
+import { timeContext } from '@/lib/llm/time-context';
+import { traceLocal, tracePrefix } from '@/lib/chat/trace';
 import {
   triggerWorkflow,
   triggerDify,
@@ -43,14 +44,14 @@ import {
   findLocalSnack,
   findLocalProduct,
   blockedProductNames,
-} from "@/lib/llm/orchestrator";
+} from '@/lib/llm/orchestrator';
 import {
   runLocalWorkflow,
   violateHardConstraint,
   memoryAvoidTags,
   budgetFromText,
   type LocalWorkflowResult,
-} from "@/lib/llm/local-workflow";
+} from '@/lib/llm/local-workflow';
 import {
   recallMemory,
   writeMemory,
@@ -60,7 +61,7 @@ import {
   resolvePending,
   type MemoryFact,
   type RecalledMemory,
-} from "@/lib/memory/store";
+} from '@/lib/memory/store';
 
 /**
  * 长期 profile 里**可信**的字段。只有这四类跨轮成立：
@@ -73,7 +74,7 @@ import {
  *      这轮一句「想吃点啥」就被当成"信息够了"直接甩卡片。
  * 场景只认当轮从用户原话 / 模型里抽出来的那份（`prefs.scene`），**不认攒下来的**。
  */
-const TRUSTED_PROFILE_KEYS = ["flavor", "budget", "avoid", "texture"] as const;
+const TRUSTED_PROFILE_KEYS = ['flavor', 'budget', 'avoid', 'texture'] as const;
 
 /**
  * 白名单清洗：从一份 profile 里只挑可信字段，其余一律丢掉。
@@ -89,14 +90,12 @@ const TRUSTED_PROFILE_KEYS = ["flavor", "budget", "avoid", "texture"] as const;
  * 「不限」和「5块」这类值换算出来 min/max 都是 null，选品用不上，
  * 却会作为「预算·不限」挂在侧栏——用户从没说过这话，看着像系统替他做的决定。
  */
-export function sanitizeProfile(
-  p?: Record<string, any>,
-): Record<string, string> {
+export function sanitizeProfile(p?: Record<string, any>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of TRUSTED_PROFILE_KEYS) {
     const v = (p || {})[k];
-    if (typeof v !== "string" || !v.trim() || v === "null") continue;
-    if (k === "budget") {
+    if (typeof v !== 'string' || !v.trim() || v === 'null') continue;
+    if (k === 'budget') {
       const b = budgetFromText(v.trim());
       if (b.min == null && b.max == null) continue;
     }
@@ -124,26 +123,24 @@ export function pickTrustedProfile(
   message: string,
   prefs?: Record<string, any>,
 ): Record<string, string> {
-  const local = extractPrefsFromText(message || "") as Record<string, unknown>;
+  const local = extractPrefsFromText(message || '') as Record<string, unknown>;
   const out: Record<string, string> = {};
   for (const k of TRUSTED_PROFILE_KEYS) {
     const v = (prefs || {})[k];
-    const fromModel = typeof v === "string" ? v.trim() : "";
+    const fromModel = typeof v === 'string' ? v.trim() : '';
 
     // 出处①：本地确定性抽取认出来的（"不吃辣""花生过敏""便宜点"……）
-    const localHit = typeof local[k] === "string" ? String(local[k]).trim() : "";
+    const localHit = typeof local[k] === 'string' ? String(local[k]).trim() : '';
     // 出处②：模型填的这个词**原样出现在用户原话里**（"来点10元内的"——
     //   本地那套"嫌贵"的说法没命中，但用户确实是这么说的）。
     //   只认字面命中："有什么好吃的"对不上任何偏好词，模型脑补的那个值必然落空。
     const literalHit =
-      fromModel && fromModel !== "null" && (message || "").includes(fromModel)
-        ? fromModel
-        : "";
+      fromModel && fromModel !== 'null' && (message || '').includes(fromModel) ? fromModel : '';
 
     // 本地抽到的更可靠（同一个意思可能有几种写法），它优先
     const value = localHit || literalHit;
     if (!value) continue;
-    if (k === "budget") {
+    if (k === 'budget') {
       const b = budgetFromText(value);
       if (b.min == null && b.max == null) continue;
     }
@@ -158,10 +155,7 @@ export function pickTrustedProfile(
  * 前端会把这份 profile 攒进 localStorage 并在下一轮带回来，
  * 所以这里漏一个字段出去，就等于允许它变成"用户一直记着的偏好"。
  */
-export function cleanProfile(
-  message: string,
-  p?: Record<string, any>,
-): Record<string, string> {
+export function cleanProfile(message: string, p?: Record<string, any>): Record<string, string> {
   return pickTrustedProfile(message, p);
 }
 
@@ -186,45 +180,41 @@ export async function handleMemoryIntent(
 ): Promise<Record<string, unknown> | null> {
   const intent = detectMemoryIntent(message);
 
-  if (intent === "query") {
-    traceLocal(traceId, "记忆意图:查询", "本地办结，不进大脑");
+  if (intent === 'query') {
+    traceLocal(traceId, '记忆意图:查询', '本地办结，不进大脑');
     return {
-      route: "direct",
+      route: 'direct',
       reply: renderMemoryReply(memory),
       memory: snapshot(memory),
     };
   }
 
-  if (intent === "clear") {
+  if (intent === 'clear') {
     const n = await clearMemory(userId);
-    traceLocal(traceId, "记忆意图:全清", `本地办结，清掉 ${n} 条`);
+    traceLocal(traceId, '记忆意图:全清', `本地办结，清掉 ${n} 条`);
     return {
-      route: "direct",
-      reply: n
-        ? `行，记着的 ${n} 条都清了，咱从头开始`
-        : "本来也没记着啥，正好从头开始",
+      route: 'direct',
+      reply: n ? `行，记着的 ${n} 条都清了，咱从头开始` : '本来也没记着啥，正好从头开始',
       // 清完要回最新快照，不然前端侧栏还挂着已经删掉的偏好
       memory: snapshot(await recallMemory(userId)),
       // 告诉前端"这次是真清了"，前端才好把本地缓存一起抹掉，避免界面和后端对不上
-      memory_action: "cleared",
+      memory_action: 'cleared',
     };
   }
 
-  if (intent === "delete") {
+  if (intent === 'delete') {
     const kw = extractMemoryKeyword(message);
     const ok = kw ? await deleteMemory(userId, kw) : false;
     traceLocal(
       traceId,
-      "记忆意图:单条删除",
-      ok ? `软删「${kw}」` : "抠不出关键词，不猜（回「你要我忘掉哪条」）",
+      '记忆意图:单条删除',
+      ok ? `软删「${kw}」` : '抠不出关键词，不猜（回「你要我忘掉哪条」）',
     );
     return {
-      route: "direct",
-      reply: ok
-        ? `行，${kw}这条我删了，以后不按它来`
-        : "你要我忘掉哪条？说具体点，我不猜",
+      route: 'direct',
+      reply: ok ? `行，${kw}这条我删了，以后不按它来` : '你要我忘掉哪条？说具体点，我不猜',
       memory: snapshot(await recallMemory(userId)),
-      memory_action: ok ? "deleted" : null,
+      memory_action: ok ? 'deleted' : null,
       memory_keyword: ok ? kw : undefined,
     };
   }
@@ -240,11 +230,7 @@ export async function handleMemoryIntent(
  * **完全不过硬过滤**——主工作流记得住忌口，这条支路却记不住，
  * 同一个用户在两个入口得到两种结果。忌口是死命令，不能看入口。
  */
-export function cardBlocked(
-  card: any,
-  memory: RecalledMemory,
-  traceId?: string,
-): string | null {
+export function cardBlocked(card: any, memory: RecalledMemory, traceId?: string): string | null {
   const name = card?.name;
   if (!name) return null;
 
@@ -259,7 +245,7 @@ export function cardBlocked(
     budget_max: null,
   });
   if (reason) {
-    traceLocal(traceId, "点名的货撞忌口/过敏", `卡片不给：${name}（${reason}）`);
+    traceLocal(traceId, '点名的货撞忌口/过敏', `卡片不给：${name}（${reason}）`);
   }
   return reason;
 }
@@ -274,21 +260,21 @@ export function cardBlocked(
  * 由调用方拿人设内的兜底话术顶上，绝不留空气泡。
  */
 export function stripFakeList(reply: string, traceId?: string): string {
-  const lines = (reply || "")
+  const lines = (reply || '')
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
   const idx = lines.findIndex((l) => /^\d+[.、]\s*.+[｜|]\s*\d/.test(l));
-  if (idx < 0) return reply || "";
+  if (idx < 0) return reply || '';
   traceLocal(
     traceId,
-    "陪聊轮自己编了商品清单",
-    idx > 0 ? "截掉清单，只留前面的安抚语" : "整段是清单，作废落兜底话术",
+    '陪聊轮自己编了商品清单',
+    idx > 0 ? '截掉清单，只留前面的安抚语' : '整段是清单，作废落兜底话术',
   );
   // 清单行之前还有话 → 那才是安抚语，留下
-  if (idx > 0) return lines.slice(0, idx).join("\n");
+  if (idx > 0) return lines.slice(0, idx).join('\n');
   // 一上来就是清单 → 没有安抚语可留，整个作废
-  return "";
+  return '';
 }
 
 /**
@@ -303,20 +289,18 @@ export function guardReply(
   memory: RecalledMemory,
   traceId?: string,
 ): string {
-  const clean = (reply || "").trim();
+  const clean = (reply || '').trim();
   if (!clean) return clean;
 
-  const hit = blockedProductNames(memoryAvoidTags(memory)).find((n) =>
-    clean.includes(n),
-  );
+  const hit = blockedProductNames(memoryAvoidTags(memory)).find((n) => clean.includes(n));
   if (!hit) return clean;
 
   // 这里不往下传 traceId：cardBlocked 会再打一条"卡片不给"，
   // 同一件事打两行只会让日志变吵
   const reason = cardBlocked({ name: hit }, memory);
-  traceLocal(traceId, "话里提到了忌口货", `整句换成劝阻：${hit}`);
+  traceLocal(traceId, '话里提到了忌口货', `整句换成劝阻：${hit}`);
   // 不带问号：推荐轮这段话后面还要接本地合成的清单，写成问句会自相矛盾
-  return `嗯，${hit}这个我得拦住——${(reason || "它跟你的忌口对不上").replace(/^用户/, "你")}。`;
+  return `嗯，${hit}这个我得拦住——${(reason || '它跟你的忌口对不上').replace(/^用户/, '你')}。`;
 }
 
 /**
@@ -347,14 +331,14 @@ export async function handleInsistAvoid(
 
   traceLocal(
     traceId,
-    "硬要忌口货（强制性句式）",
+    '硬要忌口货（强制性句式）',
     `本地回绝，不进 LLM、不出卡片：${hit.name}（${reason}）`,
   );
 
   return {
-    route: "direct",
+    route: 'direct',
     // reason 是内部视角（"用户不吃辣"），换成"你"才像人话
-    reply: `知道你铁了心，但${reason.replace(/^用户/, "你")}，我哪敢给你推${hit.name}。换个别的解解馋？`,
+    reply: `知道你铁了心，但${reason.replace(/^用户/, '你')}，我哪敢给你推${hit.name}。换个别的解解馋？`,
     profile: {},
     memory: snapshot(memory),
   };
@@ -377,13 +361,13 @@ export async function handlePendingConfirm(
   const reply = await handlePendingConfirmation(userId, message);
   if (!reply) return null;
 
-  traceLocal(traceId, "待确认记忆收到表态", "本地办结，pending 转正或作废");
+  traceLocal(traceId, '待确认记忆收到表态', '本地办结，pending 转正或作废');
   return {
-    route: "direct",
+    route: 'direct',
     reply,
     memory: snapshot(await recallMemory(userId)),
     // 告诉前端这次把一条待确认的记忆办结了，侧栏可以据此刷新
-    memory_action: "resolved",
+    memory_action: 'resolved',
   };
 }
 
@@ -409,8 +393,8 @@ function statedTasteOf(input: {
   filters?: Filters;
 }): string[] {
   const out = new Set<string>();
-  const localThisTurn = extractPrefsFromText(input.message || "");
-  const localRecent = extractPrefsFromText(input.recentText || "");
+  const localThisTurn = extractPrefsFromText(input.message || '');
+  const localRecent = extractPrefsFromText(input.recentText || '');
   const candidates = [
     input.filters?.flavor,
     input.userProfile?.flavor,
@@ -421,7 +405,7 @@ function statedTasteOf(input: {
     localRecent.texture,
   ];
   for (const v of candidates) {
-    if (typeof v === "string" && v && v !== "null") out.add(v);
+    if (typeof v === 'string' && v && v !== 'null') out.add(v);
   }
   return [...out];
 }
@@ -447,7 +431,7 @@ export async function runRecommendation(input: {
   // 长期 profile 只信那四类：场景/情绪这类当轮语境不参与合并（见 sanitizeProfile）
   const trustedProfile = sanitizeProfile(input.userProfile);
   const workflowInput = {
-    keyword: [input.prefs.flavor, input.prefs.scene].filter(Boolean).join(" "),
+    keyword: [input.prefs.flavor, input.prefs.scene].filter(Boolean).join(' '),
     user_id: input.userId,
     user_profile: { ...trustedProfile, ...input.prefs },
     exclude: input.exclude,
@@ -462,17 +446,17 @@ export async function runRecommendation(input: {
     avoidTags: memoryAvoidTags(input.memory),
   };
 
-  const provider = (process.env.ORCHESTRATOR || "local").trim();
+  const provider = (process.env.ORCHESTRATOR || 'local').trim();
   let recommendations: any[] | undefined;
   let degraded = false;
   let workflow: LocalWorkflowResult | undefined;
 
   try {
-    if (provider === "dify") {
+    if (provider === 'dify') {
       // Dify：异步，先拿执行 ID 再轮询
       const execId = await triggerDify(workflowInput);
       recommendations = await pollWorkflow(execId, 15000);
-    } else if (provider === "coze") {
+    } else if (provider === 'coze') {
       // Coze：同步拿结果
       recommendations = await triggerWorkflow(workflowInput);
     } else {
@@ -484,8 +468,7 @@ export async function runRecommendation(input: {
       // 长期那份只取可信字段：场景/情绪不进来（见 pickTrustedProfile）
       const mergedPrefsBoth: Record<string, any> = { ...trustedProfile };
       for (const [k, v] of Object.entries(input.prefs || {})) {
-        if (v !== null && v !== undefined && v !== "" && v !== "null")
-          mergedPrefsBoth[k] = v;
+        if (v !== null && v !== undefined && v !== '' && v !== 'null') mergedPrefsBoth[k] = v;
       }
       workflow = runLocalWorkflow({
         message: input.message,
@@ -501,15 +484,11 @@ export async function runRecommendation(input: {
     }
   } catch (wfErr: any) {
     // 编排挂了不能让用户空手而归，降级到内置零食库
-    console.error(
-      `${tracePrefix()}[Workflow Fallback]`,
-      provider,
-      wfErr?.message,
-    );
+    console.error(`${tracePrefix()}[Workflow Fallback]`, provider, wfErr?.message);
     traceLocal(
       input.traceId,
       `选品编排抛错（${provider}）`,
-      `兜内置库，原因：${wfErr?.message || "未知"}`,
+      `兜内置库，原因：${wfErr?.message || '未知'}`,
     );
     recommendations = matchLocalFallback(workflowInput);
     degraded = true;
@@ -522,32 +501,20 @@ export async function runRecommendation(input: {
   if (!recommendations || recommendations.length === 0) {
     const urge = URGE_PATTERN.test(input.message);
     if (workflow?.follow_up && !urge) {
-      traceLocal(
-        input.traceId,
-        "约束不足（167988 追问闸）",
-        "本轮不出卡片，先追问偏好",
-      );
+      traceLocal(input.traceId, '约束不足（167988 追问闸）', '本轮不出卡片，先追问偏好');
       return { recommendations: [], degraded: false, workflow };
     }
     if (urge) {
-      traceLocal(input.traceId, "用户在催货", "跳过追问，直接给兜底卡片");
+      traceLocal(input.traceId, '用户在催货', '跳过追问，直接给兜底卡片');
     }
-    traceLocal(
-      input.traceId,
-      "本地工作流一件都没选出来",
-      "兜内置库并标 degraded",
-    );
+    traceLocal(input.traceId, '本地工作流一件都没选出来', '兜内置库并标 degraded');
     recommendations = matchLocalFallback(workflowInput);
     degraded = true;
 
     // 兜底还是空的：多半是"别重复上轮"把池子掏空了，把 exclude 也放掉再兜一次。
     // 忌口 / 过敏在 user_profile.avoid 里，硬约束始终不动——宁可少给，不能给错。
     if (!recommendations.length) {
-      traceLocal(
-        input.traceId,
-        "兜底仍为空",
-        "放掉 exclude 再兜一次（忌口/过敏不松）",
-      );
+      traceLocal(input.traceId, '兜底仍为空', '放掉 exclude 再兜一次（忌口/过敏不松）');
       recommendations = matchLocalFallback({ ...workflowInput, exclude: [] });
       degraded = true;
     }
@@ -589,14 +556,14 @@ export async function runLocalBrain(input: {
   /** 链路日志 TraceID：只用于打点，不参与任何判定 */
   traceId?: string;
 }): Promise<Record<string, unknown>> {
-  logDegraded("大脑不可用 → 本地链路兜底", {
+  logDegraded('大脑不可用 → 本地链路兜底', {
     userId: input.userId,
     msg: input.message,
   });
   traceLocal(
     input.traceId,
-    "大脑不可用（Key 欠费/没配/provider 全挂）",
-    "转本地链路：意图/选品/硬过滤/话术合成全在本地",
+    '大脑不可用（Key 欠费/没配/provider 全挂）',
+    '转本地链路：意图/选品/硬过滤/话术合成全在本地',
   );
 
   // 偏好：本地从最近 4 轮原文抠（忌口 / 场景 / 口味），长期 profile 打底，当轮说法优先。
@@ -605,8 +572,7 @@ export async function runLocalBrain(input: {
   // 长期那份只取可信字段：场景/情绪是当轮语境，不该从前端攒的 profile 里复活
   const prefs: Record<string, any> = { ...sanitizeProfile(input.userProfile) };
   for (const [k, v] of Object.entries(localPrefs)) {
-    if (v !== null && v !== undefined && v !== "" && v !== "null")
-      prefs[k] = v;
+    if (v !== null && v !== undefined && v !== '' && v !== 'null') prefs[k] = v;
   }
   // 左侧栏选了口味/预算 = 用户亲手点的约束。模型在的时候会把它们填进 preferences
   // （提示词 §2.3 就是这么要求的），本地链路得自己补上，否则响应的 filters 回显是空的
@@ -614,13 +580,7 @@ export async function runLocalBrain(input: {
   if (input.filters?.budget) prefs.budget = input.filters.budget;
 
   // 记忆照常同步：用户这时候说"我不吃辣"仍然要记下来，不能因为大脑断了就失忆
-  const mem = await syncMemory(
-    input.userId,
-    input.message,
-    prefs,
-    input.memory,
-    input.traceId,
-  );
+  const mem = await syncMemory(input.userId, input.message, prefs, input.memory, input.traceId);
   const freshMemory = await recallMemory(input.userId);
   const base = {
     // 大脑不在的这一轮，prefs 完全来自本地抽取 + 长期 profile，
@@ -639,13 +599,13 @@ export async function runLocalBrain(input: {
       const blocked = cardBlocked(card, freshMemory);
       traceLocal(
         input.traceId,
-        "本地链路:打听具体商品",
-        blocked ? "点名的货撞忌口 → 不给卡，话也换成劝阻" : "给卡片 + 数据里的卖点",
+        '本地链路:打听具体商品',
+        blocked ? '点名的货撞忌口 → 不给卡，话也换成劝阻' : '给卡片 + 数据里的卖点',
       );
       return {
-        route: "direct",
+        route: 'direct',
         reply: blocked
-          ? `这个我得拦一下——${blocked.replace(/^用户/, "你")}，${card.name}就不给你推了。换个别的？`
+          ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card.name}就不给你推了。换个别的？`
           : guardReply(
               `${card.name}：${card.reason}。${card.price}元一份，要不要来一份？`,
               freshMemory,
@@ -673,25 +633,21 @@ export async function runLocalBrain(input: {
 
     traceLocal(
       input.traceId,
-      "本地链路:开口要货",
-      `选品 ${recommendations.length} 款${workflow?.follow_up ? "（条件不足，转追问）" : ""}`,
+      '本地链路:开口要货',
+      `选品 ${recommendations.length} 款${workflow?.follow_up ? '（条件不足，转追问）' : ''}`,
     );
 
     if (!recommendations.length) {
       return {
-        route: "direct",
-        reply:
-          workflow?.follow_up || "emmm 这个条件有点刁钻，换宽松点我再给你找？",
+        route: 'direct',
+        reply: workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？',
         awaiting_prefs: !!workflow?.follow_up,
         ...base,
       };
     }
 
     // 模型那句开头没有了，过渡语改由 pickTransition 按场景/口味现挑（composeRecommendReply 本来就要它）
-    const transition = guardReply(
-      pickTransition(prefs, input.filters),
-      freshMemory,
-    );
+    const transition = guardReply(pickTransition(prefs, input.filters), freshMemory);
     const reply = workflow
       ? composeRecommendReply({
           transition,
@@ -701,7 +657,7 @@ export async function runLocalBrain(input: {
       : transition;
 
     return {
-      route: "workflow",
+      route: 'workflow',
       reply: withPendingQuestion(reply, mem.question),
       recommendations,
       filters: { flavor: prefs.flavor, budget: prefs.budget },
@@ -710,17 +666,13 @@ export async function runLocalBrain(input: {
   }
 
   // 3) 其余一律陪聊：用户没点头，降级也不是"自动推荐"的理由
-  traceLocal(
-    input.traceId,
-    "本地链路:陪聊",
-    "没开口要 → 本地话术池接住，不出卡片",
-  );
+  traceLocal(input.traceId, '本地链路:陪聊', '没开口要 → 本地话术池接住，不出卡片');
   const reply = withPendingQuestion(
     pickCompanionReply(input.userId, prefs, input.message),
     mem.question,
   );
   return {
-    route: "direct",
+    route: 'direct',
     reply,
     ...(/[?？]/.test(reply) ? { lead_in: true } : {}),
     ...base,
@@ -752,27 +704,22 @@ const RESERVED_USER_ID =
   /^(proto|constructor|prototype|__proto__|tostring|valueof|hasownproperty|isprototypeof)$/i;
 
 export function normalizeUserId(raw?: unknown): string {
-  const cleaned = String(raw ?? "")
+  const cleaned = String(raw ?? '')
     .trim()
-    .replace(/[^a-zA-Z0-9_-]/g, "");
+    .replace(/[^a-zA-Z0-9_-]/g, '');
   // 撞保留字的（比如前端被塞了个 constructor）也发一次性 id，不给它落盘的机会
-  const safe = cleaned && !RESERVED_USER_ID.test(cleaned) ? cleaned : "";
-  return (
-    safe ||
-    `guest_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-  );
+  const safe = cleaned && !RESERVED_USER_ID.test(cleaned) ? cleaned : '';
+  return safe || `guest_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // ─── 长期记忆 ────────────────────────────────────
 // 记忆意图的规则表达式见 lib/rules/patterns.ts。
 
-export function detectMemoryIntent(
-  text: string,
-): "query" | "clear" | "delete" | null {
-  if (MEMORY_QUERY_PATTERN.test(text)) return "query";
+export function detectMemoryIntent(text: string): 'query' | 'clear' | 'delete' | null {
+  if (MEMORY_QUERY_PATTERN.test(text)) return 'query';
   // 全清必须先于单条删除判断，否则"全都忘掉"会被当成删某一条
-  if (MEMORY_CLEAR_PATTERN.test(text)) return "clear";
-  if (MEMORY_DELETE_PATTERN.test(text)) return "delete";
+  if (MEMORY_CLEAR_PATTERN.test(text)) return 'clear';
+  if (MEMORY_DELETE_PATTERN.test(text)) return 'delete';
   return null;
 }
 
@@ -784,8 +731,14 @@ export function detectMemoryIntent(
  * 抠不出来后端就没法删——界面标签没了、服务端还记着，下一轮又带回来。
  */
 export function extractMemoryKeyword(text: string): string {
+  // 先认白名单里的偏好对象（忌口 / 口味 / 口感 / 预算档）。
+  // 「忘掉我喜欢辣味」在这里就能落到「辣味」，不会把动词「喜欢」一起带出去。
   const hit = text.match(MEMORY_KEYWORD_PATTERN);
-  return hit ? hit[0] : "";
+  if (hit) return hit[0];
+
+  // 白名单没认出来（"忘掉我喜欢薯片"）才走动词兜底，且只取动词后面的宾语
+  const like = text.match(MEMORY_LIKE_PATTERN);
+  return like?.[1]?.trim() || '';
 }
 
 /**
@@ -793,10 +746,7 @@ export function extractMemoryKeyword(text: string): string {
  * 问句本来是接在对话里的，塞进 reply 末尾而不是另起一条消息，
  * 是因为它就是这轮回复的一部分——前端也只有一条 bubbles。
  */
-export function withPendingQuestion(
-  reply: string,
-  question?: string | null,
-): string {
+export function withPendingQuestion(reply: string, question?: string | null): string {
   if (!question) return reply;
   return `${reply}\n${question}`;
 }
@@ -850,9 +800,7 @@ export async function handlePendingConfirmation(
   if (!r) return null;
 
   // pending 的 content 形如"不吃辣=不吃辣"、"辣=喜欢辣"，取等号后面那段才是人话
-  const shown = r.content.includes("=")
-    ? r.content.split("=").pop() || r.content
-    : r.content;
+  const shown = r.content.includes('=') ? r.content.split('=').pop() || r.content : r.content;
 
   return yes
     ? `行，那以后按新的来——${shown}。旧的那条我就不提了`
@@ -868,7 +816,7 @@ export function renderMemoryReply(memory: RecalledMemory): string {
   if (!lines.length) {
     return '还没记下啥。你说过我就记着——像"我不吃辣"这种，我以后都自动避开';
   }
-  return `记着这些：\n${lines.join("\n")}\n还有要我记的吗？`;
+  return `记着这些：\n${lines.join('\n')}\n还有要我记的吗？`;
 }
 
 /**
@@ -878,11 +826,11 @@ export function renderMemoryReply(memory: RecalledMemory): string {
  */
 /** 口味 → 在记忆里认冲突用的那个字（"不吃辣" 里的"辣"） */
 const TASTE_AXIS: Record<string, string> = {
-  辣味: "辣",
-  甜味: "甜",
-  咸味: "咸",
-  酸味: "酸",
-  清淡: "清淡",
+  辣味: '辣',
+  甜味: '甜',
+  咸味: '咸',
+  酸味: '酸',
+  清淡: '清淡',
 };
 
 /**
@@ -914,13 +862,13 @@ export function factsFromMessage(
   //   ② 等于每轮都在重写一条用户这轮没提过的忌口。
   // 「这轮原话抽得出忌口吗」交给 extractPrefsFromText 答——不另立一份拒绝词表。
   const statedAvoid = extractPrefsFromText(message).avoid;
-  const avoid = (prefs.avoid || "").trim();
-  if (avoid && avoid !== "null" && statedAvoid) {
+  const avoid = (prefs.avoid || '').trim();
+  if (avoid && avoid !== 'null' && statedAvoid) {
     out.push({
-      category: "过敏忌口",
+      category: '过敏忌口',
       key: avoid,
       value: avoid,
-      polarity: "拒绝",
+      polarity: '拒绝',
       confidence: 0.9,
     });
   }
@@ -929,18 +877,18 @@ export function factsFromMessage(
   const like = message.match(/(?:喜欢|爱吃|爱|偏好|钟爱)([^，。！？\s]{1,6})/);
   if (longTerm && like && like[1]) {
     out.push({
-      category: "口味",
+      category: '口味',
       key: like[1].trim(),
       value: `喜欢${like[1].trim()}`,
-      polarity: "喜欢",
+      polarity: '喜欢',
       confidence: 0.6,
     });
   }
 
   // 本轮开口要的口味撞上长期记住的忌口 → 冲突事实，交 decideMemoryAction 挂待确认。
   // **过敏不在内**：过敏是死命令，没有"改口"这个选项，绝不能拿来问用户要不要作废
-  const want = (prefs.flavor || "").trim();
-  const axis = want ? TASTE_AXIS[want] : "";
+  const want = (prefs.flavor || '').trim();
+  const axis = want ? TASTE_AXIS[want] : '';
   // 门槛不能是 `!out.length`：out 里那条口味事实（"我平时都喜欢…"抽出来的）
   // 跟"这轮是不是改口"毫无关系——拿它当门槛，改口永远问不出口（实测事故：
   // 记着"不吃辣"的人说"我平时都喜欢吃辣的"，既没挂 pending，
@@ -953,20 +901,18 @@ export function factsFromMessage(
       ...(memory.summary_memory || []),
       ...(memory.active_fragments || []),
     ];
-    const clash = pool.find(
-      (t) => t.includes(axis) && /不吃|不要|忌|戒|不碰|不想吃|不嗜/.test(t),
-    );
+    const clash = pool.find((t) => t.includes(axis) && /不吃|不要|忌|戒|不碰|不想吃|不嗜/.test(t));
     if (clash) {
       // 冲突是本轮**最重要**的一条事实：decideMemoryAction 只看 facts[0]
       // （拿它去记忆里对、也拿它写 pending），所以必须排到最前面去。
       // 排后面的话，决策看的是"喜欢吃辣的"那条——它在记忆里对不上"不吃辣"，
       // 会被当成新记忆直接写进去：问都不问就把忌口改了。
       out.unshift({
-        category: "口味",
+        category: '口味',
         // key 用轴上的那个字：matchExisting 靠它去记忆里对上"不吃辣"这条
         key: axis,
         value: `想吃${axis}`,
-        polarity: "喜欢",
+        polarity: '喜欢',
         confidence: 0.5,
       });
     }
@@ -999,51 +945,51 @@ export async function syncMemory(
   const d = decideMemoryAction(
     facts,
     memory,
-    MEMORY_DELETE_PATTERN.test(message) ? "删除记忆" : "表达偏好",
+    MEMORY_DELETE_PATTERN.test(message) ? '删除记忆' : '表达偏好',
   );
   // 只有"本地替用户做了个判断"才值得打点：改口要挂待确认、或者本轮要求删除。
   // 常规写入（new_memory / consistent_update）每轮都在发生，打进去就等于没有信号——
   // [Local] 的定义是"拦截/兜底"，不是"这轮动了记忆"。
-  if (d.decision === "confirmation_required" || d.decision === "delete_required") {
+  if (d.decision === 'confirmation_required' || d.decision === 'delete_required') {
     traceLocal(
       traceId,
-      `记忆冲突:${facts.map((f) => f.category).join("/")}`,
-      d.decision === "delete_required"
-        ? "本轮要求删除，软删旧偏好"
-        : "改口撞上旧偏好 → 挂 pending 并向本人追问",
+      `记忆冲突:${facts.map((f) => f.category).join('/')}`,
+      d.decision === 'delete_required'
+        ? '本轮要求删除，软删旧偏好'
+        : '改口撞上旧偏好 → 挂 pending 并向本人追问',
     );
   }
 
-  if (d.decision === "delete_required") {
+  if (d.decision === 'delete_required') {
     await deleteMemory(userId, d.matched_memory.keyword);
     return { question: null };
   }
 
-  if (d.decision === "new_memory" || d.decision === "consistent_update") {
+  if (d.decision === 'new_memory' || d.decision === 'consistent_update') {
     const fact = facts[0];
     await writeMemory(userId, [
       {
-        layer: d.write_layer === "none" ? "core_profile" : d.write_layer,
+        layer: d.write_layer === 'none' ? 'core_profile' : d.write_layer,
         keyword: d.matched_memory.keyword || fact.key,
         content: d.matched_memory.content || `${fact.key}=${fact.value}`,
         category: fact.category,
         polarity: fact.polarity,
-        status: "active",
+        status: 'active',
       },
     ]);
     return { question: null };
   }
 
-  if (d.decision === "confirmation_required") {
+  if (d.decision === 'confirmation_required') {
     const fact = facts[0];
     await writeMemory(userId, [
       {
-        layer: "fragment_memory",
+        layer: 'fragment_memory',
         keyword: `待确认_${fact.key}`,
         content: `${fact.key}=${fact.value}`,
         category: fact.category,
         polarity: fact.polarity,
-        status: "pending",
+        status: 'pending',
       },
     ]);
     // 挂上待确认还不够——这句提问必须由我们问出去，用户才有机会答，
@@ -1058,51 +1004,30 @@ export async function syncMemory(
  * 推荐前的过渡语：按场景 / 情绪挑文案池，随机抽一条。
  * 每次都"来了——"会像自动售货机；场景贴合的过渡语（"吹着海风配点脆的——"）才像朋友。
  */
-export function pickTransition(
-  prefs: Record<string, any>,
-  filters?: Filters,
-): string {
+export function pickTransition(prefs: Record<string, any>, filters?: Filters): string {
   // 左侧栏明确选了口味，以它为先
   if (filters?.flavor) return `好，按你选的${filters.flavor}来——`;
 
   const pools: Record<string, string[]> = {
-    海边: [
-      "吹着海风配点脆的，绝了——",
-      "海边就得带点轻盈的——",
-      "看海标配，清爽不腻口——",
-    ],
-    户外: [
-      "出去玩就得带点扛饿的——",
-      "背上包，这几样管饱——",
-      "野餐清单，照着带就行——",
-    ],
-    看剧: [
-      "追剧标配，直接抄作业——",
-      "剧还没开，先把粮备上——",
-      "看剧没这个等于白看——",
-    ],
-    加班: ["熬着也得垫点——", "打工人的续航口粮——", "深夜续命，安排——"],
-    办公室: ["办公室抽屉常备款——", "摸鱼零嘴，安排——"],
-    烦: ["行，那歇会儿。来个能泄愤的——", "憋屈就该辣一顿——"],
-    生气: ["行，那歇会儿。来个能泄愤的——", "憋屈就该辣一顿——"],
-    难过: ["抱抱你。整点甜的缓一缓——", "甜的东西最治这一套——"],
-    丧: ["抱抱你。整点甜的缓一缓——", "甜的东西最治这一套——"],
-    无聊: ["那给你找点新鲜的——"],
-    开心: ["开心就整点好的——", "值得庆祝一下，挑吧——"],
+    海边: ['吹着海风配点脆的，绝了——', '海边就得带点轻盈的——', '看海标配，清爽不腻口——'],
+    户外: ['出去玩就得带点扛饿的——', '背上包，这几样管饱——', '野餐清单，照着带就行——'],
+    看剧: ['追剧标配，直接抄作业——', '剧还没开，先把粮备上——', '看剧没这个等于白看——'],
+    加班: ['熬着也得垫点——', '打工人的续航口粮——', '深夜续命，安排——'],
+    办公室: ['办公室抽屉常备款——', '摸鱼零嘴，安排——'],
+    烦: ['行，那歇会儿。来个能泄愤的——', '憋屈就该辣一顿——'],
+    生气: ['行，那歇会儿。来个能泄愤的——', '憋屈就该辣一顿——'],
+    难过: ['抱抱你。整点甜的缓一缓——', '甜的东西最治这一套——'],
+    丧: ['抱抱你。整点甜的缓一缓——', '甜的东西最治这一套——'],
+    无聊: ['那给你找点新鲜的——'],
+    开心: ['开心就整点好的——', '值得庆祝一下，挑吧——'],
   };
 
   const pool = (prefs.scene && pools[prefs.scene]) ||
-    (prefs.emotion && pools[prefs.emotion]) || [
-      "来了——",
-      "安排——",
-      "这几个挑挑——",
-    ];
+    (prefs.emotion && pools[prefs.emotion]) || ['来了——', '安排——', '这几个挑挑——'];
 
   // 白天不许提"深夜/熬夜/通宵"：提示词第十节对人设是这么要求的（见汇总文档 §7.1），
   // 本地话术池也得照做——上午甩一句"深夜续命，安排——"，读着像对面坐了个没睡醒的人。
-  const usable = timeContext().isNight
-    ? pool
-    : pool.filter((t: string) => !NIGHT_PATTERN.test(t));
+  const usable = timeContext().isNight ? pool : pool.filter((t: string) => !NIGHT_PATTERN.test(t));
 
   return (
     usable[Math.floor(Math.random() * usable.length)] ??

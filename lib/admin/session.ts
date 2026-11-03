@@ -9,27 +9,27 @@
  * 密钥由 `ADMIN_PASSWORD_HASH` 派生：改口令即让所有已签发会话立即失效，
  * 不需要额外维护一张会话表。
  */
-import { createHmac, timingSafeEqual } from 'crypto'
+import { createHmac, timingSafeEqual } from 'crypto';
 
 /** 会话有效期，与 cookie 的 maxAge 保持一致（8 小时） */
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 
 /** 派生密钥时掺进去的固定标签，避免拿口令哈希直接当 HMAC key */
-const KEY_LABEL = 'cx_admin_session_v1'
+const KEY_LABEL = 'cx_admin_session_v1';
 
 function sessionKey(secret: string): string {
-  return createHmac('sha256', secret).update(KEY_LABEL).digest('hex')
+  return createHmac('sha256', secret).update(KEY_LABEL).digest('hex');
 }
 
 function sign(payload: string, secret: string): string {
-  return createHmac('sha256', sessionKey(secret)).update(payload).digest('hex')
+  return createHmac('sha256', sessionKey(secret)).update(payload).digest('hex');
 }
 
 /** 签发一条会话票据（登录成功后写进 cookie 的就是这个值） */
 export function createSessionTicket(secret: string, now = Date.now()): string {
-  const exp = Math.floor(now / 1000) + SESSION_MAX_AGE_SECONDS
-  const payload = String(exp)
-  return `${payload}.${sign(payload, secret)}`
+  const exp = Math.floor(now / 1000) + SESSION_MAX_AGE_SECONDS;
+  const payload = String(exp);
+  return `${payload}.${sign(payload, secret)}`;
 }
 
 /**
@@ -43,30 +43,30 @@ export function verifySessionTicket(
   secret: string | undefined,
   now = Date.now(),
 ): boolean {
-  if (!ticket || !secret) return false
+  if (!ticket || !secret) return false;
 
-  const dot = ticket.lastIndexOf('.')
-  if (dot <= 0 || dot === ticket.length - 1) return false
+  const dot = ticket.lastIndexOf('.');
+  if (dot <= 0 || dot === ticket.length - 1) return false;
 
-  const payload = ticket.slice(0, dot)
-  const given = ticket.slice(dot + 1)
+  const payload = ticket.slice(0, dot);
+  const given = ticket.slice(dot + 1);
 
-  if (!/^\d{1,12}$/.test(payload)) return false
-  if (!/^[0-9a-f]{64}$/i.test(given)) return false
+  if (!/^\d{1,12}$/.test(payload)) return false;
+  if (!/^[0-9a-f]{64}$/i.test(given)) return false;
 
-  const exp = Number(payload)
-  if (exp * 1000 <= now) return false
+  const exp = Number(payload);
+  if (exp * 1000 <= now) return false;
 
-  const expected = sign(payload, secret)
+  const expected = sign(payload, secret);
 
   // 长度已经由正则保证一致，timingSafeEqual 只用于消除逐字节比较的时间差
-  const a = Buffer.from(given, 'hex')
-  const b = Buffer.from(expected, 'hex')
-  return a.length === b.length && timingSafeEqual(a, b)
+  const a = Buffer.from(given, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** 口令比对：同样用常量时间比较，避免按前缀逐位试出口令 */
 export function safeEqualHex(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'))
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
 }

@@ -1,52 +1,52 @@
-import { cookies } from 'next/headers'
-import { createHash } from 'crypto'
+import { cookies } from 'next/headers';
+import { createHash } from 'crypto';
 import {
   createSessionTicket,
   verifySessionTicket,
   safeEqualHex,
   SESSION_MAX_AGE_SECONDS,
-} from '@/lib/admin/session'
+} from '@/lib/admin/session';
 
-const COOKIE = 'cx_admin'
+const COOKIE = 'cx_admin';
 
 function sha256(text: string) {
-  return createHash('sha256').update(text).digest('hex')
+  return createHash('sha256').update(text).digest('hex');
 }
 
 async function login(formData: FormData) {
-  'use server'
-  const pw = String(formData.get('password') || '')
-  const expected = process.env.ADMIN_PASSWORD_HASH
+  'use server';
+  const pw = String(formData.get('password') || '');
+  const expected = process.env.ADMIN_PASSWORD_HASH;
 
-  if (!expected) return
-  if (!safeEqualHex(sha256(pw), expected)) return
+  if (!expected) return;
+  if (!safeEqualHex(sha256(pw), expected)) return;
 
   // 票据由服务端用 ADMIN_PASSWORD_HASH 派生密钥签名，
   // 光手写一个 cookie 名进来是过不了校验的。
-  const store = await cookies()
+  const store = await cookies();
   store.set(COOKIE, createSessionTicket(expected), {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     maxAge: SESSION_MAX_AGE_SECONDS, // 8 小时
     path: '/',
-  })
+  });
 }
 
 async function logout() {
-  'use server'
-  const store = await cookies()
-  store.delete(COOKIE)
+  'use server';
+  const store = await cookies();
+  store.delete(COOKIE);
 }
 
 export default async function AdminPage() {
-  const hash = process.env.ADMIN_PASSWORD_HASH
-  const store = await cookies()
-  const authed = verifySessionTicket(store.get(COOKIE)?.value, hash)
+  const hash = process.env.ADMIN_PASSWORD_HASH;
+  const store = await cookies();
+  const authed = verifySessionTicket(store.get(COOKIE)?.value, hash);
 
   // 未设置口令：给出配置方法，不让任何人进得来
   if (!hash) {
-    return <Notice>还没设置 ADMIN_PASSWORD_HASH，后台未启用。</Notice>
+    return <Notice>还没设置 ADMIN_PASSWORD_HASH，后台未启用。</Notice>;
   }
 
   if (!authed) {
@@ -70,15 +70,30 @@ export default async function AdminPage() {
           配置，取明文口令的 sha256。改完记得重启 dev。
         </p>
       </Shell>
-    )
+    );
   }
 
   const rows = [
-    ['大脑', 'DeepSeek', !!process.env.DEEPSEEK_API_KEY, process.env.DEEPSEEK_MODEL || 'deepseek-chat'],
+    [
+      '大脑',
+      'DeepSeek',
+      !!process.env.DEEPSEEK_API_KEY,
+      process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+    ],
     ['编排引擎', 'Coze / Dify / local', true, process.env.ORCHESTRATOR || 'coze'],
-    ['Coze', '工作流', !!process.env.COZE_API_KEY, process.env.COZE_WORKFLOW_ID ? '已配 workflow' : '未配 workflow'],
-    ['Dify', '备用异步', !!process.env.DIFY_API_KEY, process.env.DIFY_BASE_URL || 'http://localhost:3000/v1'],
-  ] as const
+    [
+      'Coze',
+      '工作流',
+      !!process.env.COZE_API_KEY,
+      process.env.COZE_WORKFLOW_ID ? '已配 workflow' : '未配 workflow',
+    ],
+    [
+      'Dify',
+      '备用异步',
+      !!process.env.DIFY_API_KEY,
+      process.env.DIFY_BASE_URL || 'http://localhost:3000/v1',
+    ],
+  ] as const;
 
   return (
     <Shell>
@@ -97,7 +112,9 @@ export default async function AdminPage() {
             key={name}
             className="flex items-center gap-3 rounded-xl border border-cx-100 bg-white px-4 py-3"
           >
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${ok ? 'bg-emerald-400' : 'bg-cx-200'}`} />
+            <span
+              className={`h-2.5 w-2.5 shrink-0 rounded-full ${ok ? 'bg-emerald-400' : 'bg-cx-200'}`}
+            />
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-cx-700">{name}</div>
               <div className="truncate text-xs text-cx-400">{detail}</div>
@@ -112,7 +129,7 @@ export default async function AdminPage() {
         <code className="rounded bg-cx-50 px-1">.env.local</code>。
       </p>
     </Shell>
-  )
+  );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -122,7 +139,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         {children}
       </div>
     </main>
-  )
+  );
 }
 
 function Notice({ children }: { children: React.ReactNode }) {
@@ -132,9 +149,10 @@ function Notice({ children }: { children: React.ReactNode }) {
       <p className="mt-3 text-[11px] leading-relaxed text-cx-400">
         生成方式：
         <code className="mt-1 block rounded bg-white px-2 py-1.5 text-[11px]">
-          node -e &quot;console.log(require(&apos;crypto&apos;).createHash(&apos;sha256&apos;).update(&apos;你的口令&apos;).digest(&apos;hex&apos;))&quot;
+          node -e
+          &quot;console.log(require(&apos;crypto&apos;).createHash(&apos;sha256&apos;).update(&apos;你的口令&apos;).digest(&apos;hex&apos;))&quot;
         </code>
       </p>
     </Shell>
-  )
+  );
 }

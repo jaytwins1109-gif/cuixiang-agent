@@ -13,23 +13,23 @@
 :root,
 [data-theme='warm'] {
   /* 暖阳棕（默认） */
-  --cx-50:  255 248 240;  /* #FFF8F0 奶油背景 */
-  --cx-100: 255 238 216;  /* #FFEED8 浅暖 */
-  --cx-200: 255 217 168;  /* #FFD9A8 暖橙浅 */
-  --cx-300: 255 184 77;   /* #FFB84D 主色 */
-  --cx-400: 255 159 26;   /* #FF9F1A 深橙 */
-  --cx-500: 232 133 11;   /* #E8850B 强调 */
-  --cx-600: 179 101 8;    /* #B36508 正文 */
-  --cx-700: 139 74 6;     /* #8B4A06 深文字 */
+  --cx-50: 255 248 240; /* #FFF8F0 奶油背景 */
+  --cx-100: 255 238 216; /* #FFEED8 浅暖 */
+  --cx-200: 255 217 168; /* #FFD9A8 暖橙浅 */
+  --cx-300: 255 184 77; /* #FFB84D 主色 */
+  --cx-400: 255 159 26; /* #FF9F1A 深橙 */
+  --cx-500: 232 133 11; /* #E8850B 强调 */
+  --cx-600: 179 101 8; /* #B36508 正文 */
+  --cx-700: 139 74 6; /* #8B4A06 深文字 */
 
-  --cx-surface: 255 255 255;  /* 卡片/面板底：亮色下就是纯白 */
-  --cx-shadow:  180 101 8;    /* 投影底色 */
-  --cx-scroll:  255 217 168;  /* 滚动条 */
+  --cx-surface: 255 255 255; /* 卡片/面板底：亮色下就是纯白 */
+  --cx-shadow: 180 101 8; /* 投影底色 */
+  --cx-scroll: 255 217 168; /* 滚动条 */
 }
 
 [data-theme='obsidian'] {
   /* 曜石黑：语义反转，50 最深、700 最浅 */
-  --cx-50:  26 23 21;
+  --cx-50: 26 23 21;
   --cx-100: 44 39 35;
   --cx-200: 66 59 52;
   --cx-300: 210 129 28;
@@ -39,13 +39,13 @@
   --cx-700: 245 238 230;
 
   --cx-surface: 37 33 29;
-  --cx-shadow:  0 0 0;
-  --cx-scroll:  88 78 68;
+  --cx-shadow: 0 0 0;
+  --cx-scroll: 88 78 68;
 }
 
 [data-theme='glacier'] {
   /* 冰川蓝 */
-  --cx-50:  242 248 253;
+  --cx-50: 242 248 253;
   --cx-100: 220 235 248;
   --cx-200: 185 216 240;
   --cx-300: 59 147 218;
@@ -55,8 +55,8 @@
   --cx-700: 30 50 73;
 
   --cx-surface: 251 253 255;
-  --cx-shadow:  30 90 140;
-  --cx-scroll:  185 216 240;
+  --cx-shadow: 30 90 140;
+  --cx-scroll: 185 216 240;
 }
 
 @layer base {
@@ -72,8 +72,9 @@
 
   body {
     @apply bg-cx-50 text-cx-700;
-    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC',
-      'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+      system-ui, sans-serif;
   }
 
   /**
@@ -95,7 +96,9 @@
   [data-theme] header,
   [data-theme] aside,
   [data-theme] [class*='bg-white'] {
-    transition: background-color 0.25s ease, color 0.25s ease,
+    transition:
+      background-color 0.25s ease,
+      color 0.25s ease,
       border-color 0.25s ease;
   }
 }

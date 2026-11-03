@@ -9,44 +9,44 @@
 //   - 只有 active 的核心画像和概要记忆能作为稳定偏好；碎片记忆只能参考，不能推翻核心画像
 //   - 删除是软删除，必须保留旧内容便于追溯，不能物理抹除
 
-import fs from 'node:fs/promises'
-import path from 'node:path'
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
-export type MemoryLayer = 'core_profile' | 'summary_memory' | 'fragment_memory'
-export type MemoryStatus = 'active' | 'pending' | 'resolved' | 'superseded' | 'deleted'
-export type Polarity = '喜欢' | '不喜欢' | '拒绝' | '接受' | '中立' | '不确定'
+export type MemoryLayer = 'core_profile' | 'summary_memory' | 'fragment_memory';
+export type MemoryStatus = 'active' | 'pending' | 'resolved' | 'superseded' | 'deleted';
+export type Polarity = '喜欢' | '不喜欢' | '拒绝' | '接受' | '中立' | '不确定';
 
 export interface MemoryRecord {
-  id: string
-  layer: MemoryLayer
+  id: string;
+  layer: MemoryLayer;
   /** 关键词，如「不吃辣」「花生过敏」「场景偏好_加班_清淡」 */
-  keyword: string
-  content: string
+  keyword: string;
+  content: string;
   /** 适用场景，没有则空 */
-  context?: string
-  category?: string
-  polarity?: Polarity
-  status: MemoryStatus
-  source?: string
-  created_at: string
-  updated_at: string
+  context?: string;
+  category?: string;
+  polarity?: Polarity;
+  status: MemoryStatus;
+  source?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /** 召回结果：对应工作流里 103270 节点的四个输出 */
 export interface RecalledMemory {
-  core_profile: string[]
-  summary_memory: string[]
-  active_fragments: string[]
-  pending_fragments: string[]
+  core_profile: string[];
+  summary_memory: string[];
+  active_fragments: string[];
+  pending_fragments: string[];
 }
 
 export interface MemoryFact {
-  category: string
-  key: string
-  value: string
-  polarity: Polarity
-  context?: string
-  confidence?: number
+  category: string;
+  key: string;
+  value: string;
+  polarity: Polarity;
+  context?: string;
+  confidence?: number;
 }
 
 export type MemoryDecision =
@@ -55,14 +55,19 @@ export type MemoryDecision =
   | 'consistent_update'
   | 'confirmation_required'
   | 'delete_required'
-  | 'query_memory'
+  | 'query_memory';
 
 export interface MemoryDecisionResult {
-  decision: MemoryDecision
-  matched_memory: { keyword: string; content: string; layer: MemoryLayer | 'none' }
-  conflicts: { old_keyword: string; old_content: string; new_content: string; conflict_type: string }[]
-  write_layer: 'none' | MemoryLayer
-  confirmationquestion: string
+  decision: MemoryDecision;
+  matched_memory: { keyword: string; content: string; layer: MemoryLayer | 'none' };
+  conflicts: {
+    old_keyword: string;
+    old_content: string;
+    new_content: string;
+    conflict_type: string;
+  }[];
+  write_layer: 'none' | MemoryLayer;
+  confirmationquestion: string;
 }
 
 /**
@@ -78,33 +83,35 @@ export interface MemoryDecisionResult {
  * 不引入外部依赖；真要多实例部署，再换 better-sqlite3 之类的存储。
  */
 class MemoryMutex {
-  private queue: Promise<unknown> = Promise.resolve()
+  private queue: Promise<unknown> = Promise.resolve();
 
   runExclusive<T>(task: () => Promise<T>): Promise<T> {
-    let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
 
     // 排队：把这一轮挂到当前队尾之后，先等前面全部跑完
-    const prev = this.queue
-    this.queue = prev.then(() => gate)
+    const prev = this.queue;
+    this.queue = prev.then(() => gate);
 
     return prev.then(async () => {
       try {
-        return await task()
+        return await task();
       } finally {
         // 成功失败都要放行，否则后面排队的请求会永久挂住
-        release()
+        release();
       }
-    })
+    });
   }
 }
 
 /** 全局唯一的文件锁实例：所有对 memory.json 的读写都走它 */
-const fileLock = new MemoryMutex()
-const DATA_DIR = path.join(process.cwd(), 'data')
-const MEMORY_FILE = path.join(DATA_DIR, 'memory.json')
+const fileLock = new MemoryMutex();
+const DATA_DIR = path.join(process.cwd(), 'data');
+const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
 
-type Store = Record<string, MemoryRecord[]>
+type Store = Record<string, MemoryRecord[]>;
 /**
  * 取某个用户的记录。
  *
@@ -113,87 +120,95 @@ type Store = Record<string, MemoryRecord[]>
  * 这里先认 own property，再确认它确实是数组，脏数据一律当空处理。
  */
 function listOf(store: Store, userId: string): MemoryRecord[] {
-  const raw = Object.prototype.hasOwnProperty.call(store, userId) ? store[userId] : []
-  return Array.isArray(raw) ? raw : []
+  const raw = Object.prototype.hasOwnProperty.call(store, userId) ? store[userId] : [];
+  return Array.isArray(raw) ? raw : [];
 }
-
 
 async function readStore(): Promise<Store> {
   try {
-    const raw = await fs.readFile(MEMORY_FILE, 'utf8')
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? (Object.assign(Object.create(null), parsed) as Store) : {}
+    const raw = await fs.readFile(MEMORY_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object'
+      ? (Object.assign(Object.create(null), parsed) as Store)
+      : {};
   } catch {
-    return {}
+    return {};
   }
 }
 
 async function writeStore(store: Store): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true })
+  await fs.mkdir(DATA_DIR, { recursive: true });
 
   // 写前备份：把当前这一版先复制成 memory.json.bak，再覆盖。
   // 原子写只挡「文件被写成半截」，挡不住「整份被一份错数据覆盖」——
   // 并发写丢记忆、或上游传进来空 store 时，至少还有上一版可以捞回来。
   // 首次运行（或手动清空过 data/）还没有 memory.json，复制失败属正常，忽略。
   try {
-    await fs.copyFile(MEMORY_FILE, `${MEMORY_FILE}.bak`)
+    await fs.copyFile(MEMORY_FILE, `${MEMORY_FILE}.bak`);
   } catch {
     /* 没有旧文件就没什么可备份的 */
   }
 
   // 原子写：先写临时文件再改名，避免半截文件
-  const tmp = `${MEMORY_FILE}.${process.pid}.tmp`
-  await fs.writeFile(tmp, JSON.stringify(store, null, 2), 'utf8')
-  await fs.rename(tmp, MEMORY_FILE)
+  const tmp = `${MEMORY_FILE}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(store, null, 2), 'utf8');
+  await fs.rename(tmp, MEMORY_FILE);
 }
 
 /**
- * 记忆召回。query 只是个提示（Coze 里用它做语义检索），
+ * 记忆召回。`_query` 现在用不上（Coze 里它做语义检索，本地是按状态分层取的），
  * 这里按状态分层返回：能当稳定偏好的和不能当的严格分开，避免后面的节点误用。
+ * 留着这个形参是为了和 Coze 节点的入参顺序一致，调用方不必跟着改。
  */
 export async function recallMemory(
   userId: string,
-  query: string = '零食偏好',
-  limit: number = 20
+  _query: string = '零食偏好',
+  limit: number = 20,
 ): Promise<RecalledMemory> {
   return fileLock.runExclusive(async () => {
-    const store = await readStore()
-    const list = listOf(store, userId).slice(-limit)
+    const store = await readStore();
+    const list = listOf(store, userId).slice(-limit);
 
     const fmt = (r: MemoryRecord) =>
-      r.context ? `${r.keyword}：${r.content}（${r.context}）` : `${r.keyword}：${r.content}`
+      r.context ? `${r.keyword}：${r.content}（${r.context}）` : `${r.keyword}：${r.content}`;
 
     // 按最近更新时间排：后面注入提示词时按这个顺序截断，留新不留旧。
     // updated_at 是 ISO 串，直接比字符串大小就是比时间先后。
     const recent = (rs: MemoryRecord[]) =>
-      [...rs].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      [...rs].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
     return {
-      core_profile: recent(list.filter(r => r.layer === 'core_profile' && r.status === 'active')).map(fmt),
-      summary_memory: recent(list.filter(r => r.layer === 'summary_memory' && r.status === 'active')).map(fmt),
-      active_fragments: recent(list.filter(r => r.layer === 'fragment_memory' && r.status === 'active')).map(fmt),
-      pending_fragments: list.filter(r => r.status === 'pending').map(fmt),
-    }
-  })
+      core_profile: recent(
+        list.filter((r) => r.layer === 'core_profile' && r.status === 'active'),
+      ).map(fmt),
+      summary_memory: recent(
+        list.filter((r) => r.layer === 'summary_memory' && r.status === 'active'),
+      ).map(fmt),
+      active_fragments: recent(
+        list.filter((r) => r.layer === 'fragment_memory' && r.status === 'active'),
+      ).map(fmt),
+      pending_fragments: list.filter((r) => r.status === 'pending').map(fmt),
+    };
+  });
 }
 
 /** 原始记录，删除/失效时要按 keyword 找到目标 */
 export async function listMemory(userId: string): Promise<MemoryRecord[]> {
   return fileLock.runExclusive(async () => {
-    const store = await readStore()
-    return listOf(store, userId)
-  })
+    const store = await readStore();
+    return listOf(store, userId);
+  });
 }
 
 export interface WriteEntry {
-  layer: MemoryLayer
-  keyword: string
-  content: string
-  context?: string
-  category?: string
-  polarity?: Polarity
-  status?: MemoryStatus
-  source?: string
+  layer: MemoryLayer;
+  keyword: string;
+  content: string;
+  context?: string;
+  category?: string;
+  polarity?: Polarity;
+  status?: MemoryStatus;
+  source?: string;
 }
 
 /**
@@ -202,25 +217,25 @@ export interface WriteEntry {
  */
 export async function writeMemory(userId: string, entries: WriteEntry[]): Promise<void> {
   return fileLock.runExclusive(async () => {
-    if (!entries.length) return
-    const store = await readStore()
-    const list = listOf(store, userId)
-    const now = new Date().toISOString()
+    if (!entries.length) return;
+    const store = await readStore();
+    const list = listOf(store, userId);
+    const now = new Date().toISOString();
 
     for (const e of entries) {
-      const keyword = e.keyword.trim()
-      const content = e.content.trim()
-      if (!keyword || !content) continue
+      const keyword = e.keyword.trim();
+      const content = e.content.trim();
+      if (!keyword || !content) continue;
 
-      const status = e.status || 'active'
+      const status = e.status || 'active';
       const existing = list.find(
-        r => r.layer === e.layer && r.keyword === keyword && r.status === status
-      )
+        (r) => r.layer === e.layer && r.keyword === keyword && r.status === status,
+      );
       if (existing) {
-        existing.content = content
-        existing.context = e.context ?? existing.context
-        existing.updated_at = now
-        continue
+        existing.content = content;
+        existing.context = e.context ?? existing.context;
+        existing.updated_at = now;
+        continue;
       }
       list.push({
         id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -234,36 +249,36 @@ export async function writeMemory(userId: string, entries: WriteEntry[]): Promis
         source: e.source || '对话提取',
         created_at: now,
         updated_at: now,
-      })
+      });
     }
 
-    store[userId] = list.slice(-200) // 兜个上限，别让文件无限涨
-    await writeStore(store)
-  })
+    store[userId] = list.slice(-200); // 兜个上限，别让文件无限涨
+    await writeStore(store);
+  });
 }
 
 /** 软删除：标记 deleted，保留原文便于追溯 */
 export async function deleteMemory(userId: string, keyword: string): Promise<boolean> {
   return fileLock.runExclusive(async () => {
-    const store = await readStore()
-    const list = listOf(store, userId)
-    const now = new Date().toISOString()
-    let hit = false
+    const store = await readStore();
+    const list = listOf(store, userId);
+    const now = new Date().toISOString();
+    let hit = false;
 
     for (const r of list) {
-      if (r.status === 'deleted' || r.status === 'superseded') continue
+      if (r.status === 'deleted' || r.status === 'superseded') continue;
       if (r.keyword.includes(keyword) || r.content.includes(keyword)) {
-        r.status = 'deleted'
-        r.updated_at = now
-        hit = true
+        r.status = 'deleted';
+        r.updated_at = now;
+        hit = true;
       }
     }
     if (hit) {
-      store[userId] = list
-      await writeStore(store)
+      store[userId] = list;
+      await writeStore(store);
     }
-    return hit
-  })
+    return hit;
+  });
 }
 
 /**
@@ -279,34 +294,38 @@ export async function deleteMemory(userId: string, keyword: string): Promise<boo
  */
 export async function resolvePending(
   userId: string,
-  confirm: boolean
+  confirm: boolean,
 ): Promise<{ keyword: string; content: string } | null> {
   return fileLock.runExclusive(async () => {
-    const store = await readStore()
-    const list = listOf(store, userId)
-    const now = new Date().toISOString()
+    const store = await readStore();
+    const list = listOf(store, userId);
+    const now = new Date().toISOString();
 
     // 一次只办结最近的那条：同时挂好几个待确认的话，用户一句"对"说不清Yes的是哪个
-    const pending = [...list].reverse().find(r => r.status === 'pending')
-    if (!pending) return null
+    const pending = [...list].reverse().find((r) => r.status === 'pending');
+    if (!pending) return null;
 
-    const baseKeyword = pending.keyword.replace(/^待确认_/, '')
+    const baseKeyword = pending.keyword.replace(/^待确认_/, '');
 
     if (!confirm) {
-      pending.status = 'resolved'
-      pending.updated_at = now
-      store[userId] = list
-      await writeStore(store)
-      return { keyword: baseKeyword, content: pending.content }
+      pending.status = 'resolved';
+      pending.updated_at = now;
+      store[userId] = list;
+      await writeStore(store);
+      return { keyword: baseKeyword, content: pending.content };
     }
 
     // 转正前先把旧偏好作废：同一个 keyword 的 active 记录不能再继续当稳定偏好用，
     // 否则推荐会同时吃到"不吃辣"和"喜欢辣"两条相反的约束。
     for (const r of list) {
-      if (r.id === pending.id || r.status !== 'active') continue
-      if (r.keyword === baseKeyword || baseKeyword.includes(r.keyword) || r.keyword.includes(baseKeyword)) {
-        r.status = 'superseded'
-        r.updated_at = now
+      if (r.id === pending.id || r.status !== 'active') continue;
+      if (
+        r.keyword === baseKeyword ||
+        baseKeyword.includes(r.keyword) ||
+        r.keyword.includes(baseKeyword)
+      ) {
+        r.status = 'superseded';
+        r.updated_at = now;
       }
     }
 
@@ -322,55 +341,60 @@ export async function resolvePending(
       source: '冲突确认',
       created_at: now,
       updated_at: now,
-    })
-    pending.status = 'resolved'
-    pending.updated_at = now
+    });
+    pending.status = 'resolved';
+    pending.updated_at = now;
 
-    store[userId] = list.slice(-200)
-    await writeStore(store)
-    return { keyword: baseKeyword, content: pending.content }
-  })
+    store[userId] = list.slice(-200);
+    await writeStore(store);
+    return { keyword: baseKeyword, content: pending.content };
+  });
 }
 
 /** 一次性全清：同样只做软删除，历史留着可追溯 */
 export async function clearMemory(userId: string): Promise<number> {
   return fileLock.runExclusive(async () => {
-    const store = await readStore()
-    const list = listOf(store, userId)
-    const now = new Date().toISOString()
-    let n = 0
+    const store = await readStore();
+    const list = listOf(store, userId);
+    const now = new Date().toISOString();
+    let n = 0;
 
     for (const r of list) {
-      if (r.status === 'deleted') continue
-      r.status = 'deleted'
-      r.updated_at = now
-      n++
+      if (r.status === 'deleted') continue;
+      r.status = 'deleted';
+      r.updated_at = now;
+      n++;
     }
     if (n) {
-      store[userId] = list
-      await writeStore(store)
+      store[userId] = list;
+      await writeStore(store);
     }
-    return n
-  })
+    return n;
+  });
 }
 
 /** 失效声明：旧记忆不再作为当前偏好，但不抹掉历史 */
-export async function supersedeMemory(userId: string, keyword: string, reason?: string): Promise<void> {
+export async function supersedeMemory(
+  userId: string,
+  keyword: string,
+  // 第三参是给 Coze 节点留的"为什么失效"，本地记在 updated_at 里就够，暂不落字段
+  _reason?: string,
+): Promise<void> {
   return fileLock.runExclusive(async () => {
-    const store = await readStore()
-    const list = listOf(store, userId)
-    const now = new Date().toISOString()
+    const store = await readStore();
+    const list = listOf(store, userId);
+    const now = new Date().toISOString();
 
     for (const r of list) {
-      if (r.status !== 'active') continue
+      if (r.status !== 'active') continue;
       if (r.keyword.includes(keyword) || r.content.includes(keyword)) {
-        r.status = 'superseded'
-        r.updated_at = now
+        r.status = 'superseded';
+        r.updated_at = now;
       }
     }
-    store[userId] = list
-    await writeStore(store)
-  })
+    store[userId] = list;
+    await writeStore(store);
+  });
 }
 
 /**
@@ -382,7 +406,7 @@ export async function supersedeMemory(userId: string, keyword: string, reason?: 
 export function decideMemoryAction(
   facts: MemoryFact[],
   memory: RecalledMemory,
-  intent: '表达偏好' | '修改偏好' | '删除记忆' | '查询记忆' | '普通闲聊' | '其他' = '表达偏好'
+  intent: '表达偏好' | '修改偏好' | '删除记忆' | '查询记忆' | '普通闲聊' | '其他' = '表达偏好',
 ): MemoryDecisionResult {
   const empty: MemoryDecisionResult = {
     decision: 'no_action',
@@ -390,46 +414,46 @@ export function decideMemoryAction(
     conflicts: [],
     write_layer: 'none',
     confirmationquestion: '',
-  }
+  };
 
-  if (intent === '查询记忆') return { ...empty, decision: 'query_memory' }
-  if (!facts.length) return empty
+  if (intent === '查询记忆') return { ...empty, decision: 'query_memory' };
+  if (!facts.length) return empty;
 
   // 删除：目标必须能匹配到已有记忆，匹配不到就不能猜（工作流规则 4）
   if (intent === '删除记忆') {
-    const target = matchExisting(facts, memory)
-    if (!target) return empty
+    const target = matchExisting(facts, memory);
+    if (!target) return empty;
     return {
       ...empty,
       decision: 'delete_required',
       matched_memory: target,
       write_layer: 'fragment_memory',
-    }
+    };
   }
 
-  const hard = facts.find(f => f.category === '过敏忌口' && f.polarity === '拒绝')
+  const hard = facts.find((f) => f.category === '过敏忌口' && f.polarity === '拒绝');
   if (hard) {
     return {
       ...empty,
       decision: 'new_memory',
       matched_memory: { keyword: hard.key, content: hard.value, layer: 'core_profile' },
       write_layer: 'core_profile',
-    }
+    };
   }
 
-  const fact = facts[0]
-  const existing = matchExisting([fact], memory)
+  const fact = facts[0];
+  const existing = matchExisting([fact], memory);
 
   // 已有同关键词的 active 记忆
   if (existing) {
-    const sameValue = existing.content.includes(fact.value)
+    const sameValue = existing.content.includes(fact.value);
     if (sameValue) {
       return {
         ...empty,
         decision: 'consistent_update',
         matched_memory: existing,
         write_layer: existing.layer,
-      }
+      };
     }
     // 场景不同 → 属于场景差异，不是冲突，直接按场景另存一条概要
     if (fact.context && !existing.content.includes(fact.context)) {
@@ -438,7 +462,7 @@ export function decideMemoryAction(
         decision: 'new_memory',
         matched_memory: existing,
         write_layer: 'summary_memory',
-      }
+      };
     }
     return {
       decision: 'confirmation_required',
@@ -453,36 +477,40 @@ export function decideMemoryAction(
       ],
       write_layer: 'fragment_memory',
       confirmationquestion: `你之前说过${existing.content}，现在改口成${fact.value}了？我按新的记？`,
-    }
+    };
   }
 
   return {
     ...empty,
     decision: 'new_memory',
-    matched_memory: { keyword: fact.key, content: `${fact.key}=${fact.value}`, layer: 'core_profile' },
+    matched_memory: {
+      keyword: fact.key,
+      content: `${fact.key}=${fact.value}`,
+      layer: 'core_profile',
+    },
     write_layer: 'core_profile',
-  }
+  };
 }
 
 /** 在召回结果里找本轮事实能对应的那条记忆 */
 function matchExisting(
   facts: MemoryFact[],
-  memory: RecalledMemory
+  memory: RecalledMemory,
 ): { keyword: string; content: string; layer: MemoryLayer } | null {
   const pool: { text: string; layer: MemoryLayer }[] = [
-    ...memory.core_profile.map(t => ({ text: t, layer: 'core_profile' as const })),
-    ...memory.summary_memory.map(t => ({ text: t, layer: 'summary_memory' as const })),
-    ...memory.active_fragments.map(t => ({ text: t, layer: 'fragment_memory' as const })),
-  ]
+    ...memory.core_profile.map((t) => ({ text: t, layer: 'core_profile' as const })),
+    ...memory.summary_memory.map((t) => ({ text: t, layer: 'summary_memory' as const })),
+    ...memory.active_fragments.map((t) => ({ text: t, layer: 'fragment_memory' as const })),
+  ];
 
   for (const f of facts) {
-    const hit = pool.find(p => p.text.includes(f.key) || p.text.includes(f.value))
+    const hit = pool.find((p) => p.text.includes(f.key) || p.text.includes(f.value));
     if (hit) {
-      const [keyword, ...rest] = hit.text.split('：')
-      return { keyword: keyword || f.key, content: rest.join('：') || hit.text, layer: hit.layer }
+      const [keyword, ...rest] = hit.text.split('：');
+      return { keyword: keyword || f.key, content: rest.join('：') || hit.text, layer: hit.layer };
     }
   }
-  return null
+  return null;
 }
 
 /**
@@ -490,24 +518,24 @@ function matchExisting(
  * 而且几十条里真正影响当前推荐的往往就那几条。
  * 核心画像是稳定偏好，条数本来极少，全放；概要和碎片按最近更新截断（顺序在 recallMemory 里已排好）。
  */
-const MAX_SUMMARY_INJECT = 5
-const MAX_FRAGMENT_INJECT = 3
+const MAX_SUMMARY_INJECT = 5;
+const MAX_FRAGMENT_INJECT = 3;
 
 /** 把记忆压成给大脑看的几行字（只带 active，pending 不进提示词） */
 export function renderMemoryForPrompt(memory: RecalledMemory): string {
-  const lines: string[] = []
+  const lines: string[] = [];
   if (memory.core_profile.length) {
-    lines.push(`长期偏好（一直有效）：${memory.core_profile.join('；')}`)
+    lines.push(`长期偏好（一直有效）：${memory.core_profile.join('；')}`);
   }
   if (memory.summary_memory.length) {
-    const picked = memory.summary_memory.slice(0, MAX_SUMMARY_INJECT)
-    const rest = memory.summary_memory.length - picked.length
-    lines.push(`场景偏好：${picked.join('；')}${rest ? `（还有 ${rest} 条更早的）` : ''}`)
+    const picked = memory.summary_memory.slice(0, MAX_SUMMARY_INJECT);
+    const rest = memory.summary_memory.length - picked.length;
+    lines.push(`场景偏好：${picked.join('；')}${rest ? `（还有 ${rest} 条更早的）` : ''}`);
   }
   if (memory.active_fragments.length) {
-    const picked = memory.active_fragments.slice(0, MAX_FRAGMENT_INJECT)
-    const rest = memory.active_fragments.length - picked.length
-    lines.push(`零散记录：${picked.join('；')}${rest ? `（还有 ${rest} 条更早的）` : ''}`)
+    const picked = memory.active_fragments.slice(0, MAX_FRAGMENT_INJECT);
+    const rest = memory.active_fragments.length - picked.length;
+    lines.push(`零散记录：${picked.join('；')}${rest ? `（还有 ${rest} 条更早的）` : ''}`);
   }
-  return lines.join('\n')
+  return lines.join('\n');
 }

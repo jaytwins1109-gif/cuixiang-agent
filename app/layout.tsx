@@ -1,23 +1,19 @@
-import type { Metadata, Viewport } from 'next'
-import './globals.css'
+import type { Metadata, Viewport } from 'next';
+import './globals.css';
 
 export const metadata: Metadata = {
   title: '脆香零食 · 你的零食推荐好友',
   description: '懂零食、会聊天的 AI 陪伴客服「脆脆」',
-}
+};
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
   themeColor: '#FFB84D',
-}
+};
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
@@ -33,5 +29,5 @@ export default function RootLayout({
       </head>
       <body className="bg-cx-50 text-cx-700 antialiased">{children}</body>
     </html>
-  )
+  );
 }

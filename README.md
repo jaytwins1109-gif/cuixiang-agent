@@ -35,6 +35,17 @@ npm run smoke              # 跑全部用例
 npm run smoke -- --only-prune   # 只清理历史残留的测试用户
 ```
 
+**不需要起服务的快速检查**（秒级，改完先跑这个）：
+
+```bash
+npm run verify   # tsc --noEmit + vitest（69 条：admin 票据 / profile-guard / reco-guard）
+npm run lint     # ESLint 9 flat config，0 error 0 warning 才收工
+npm run format   # Prettier 统一代码风格；npm run format:check 只检查不改
+npm run guard    # 守卫脚本 CLI 版（profile-guard + reco-guard），和 vitest 同一批断言
+```
+
+> `verify` / `lint` / `format:check` 全绿才值得去跑 smoke——smoke 一轮要好几分钟。
+
 **记忆文件归档**（防止 `data/memory.json` 无限膨胀）：
 
 ```bash
@@ -155,7 +166,8 @@ event: error   {"message":"..."}
 
 ```text
 app/
-  page.tsx              聊天界面（流式优先，失败自动退回一次性）
+  page.tsx              聊天界面主壳（状态 + 发送链路，流式优先，失败自动退回一次性）
+  _components/          界面零件（气泡 / 卡片 / 筛选栏 / 皮肤 / 防抖写盘 / 常量类型）
   admin/page.tsx        后台（口令登录）
   api/ai/route.ts       普通入口：解析 → 大脑 → 分流 → 返回
   api/ai/stream/route.ts 流式入口（SSE）：同一套判断，边收边吐
@@ -176,9 +188,15 @@ lib/
   memory/store.ts       长期记忆（分层 / 状态 / 决策 / 串行锁）
   data/snacks.ts        商品数据 + 每日推荐理由
 scripts/
-  smoke.mjs             回归测试
+  smoke.mjs             回归测试（端到端，要 dev server）
+  profile-guard.ts      偏好抽取 / 记忆删除关键词守卫（纯函数）
+  reco-guard.ts         检索强约束 / 诚实理由 / 气泡文案守卫（纯函数）
+  fallback-guard.ts     兜底链路的忌口守卫
+  guard-types.ts        守卫结果的统一形状（CLI 与 vitest 共用）
   gen-password.mjs      生成后台口令哈希
   prune-memory.mjs      记忆归档清理
+tests/
+  *.test.ts             vitest：把上面三份守卫的断言变成正式用例
 ```
 
 ---

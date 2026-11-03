@@ -1,10 +1,7 @@
-import type { Config } from 'tailwindcss'
+import type { Config } from 'tailwindcss';
 
 export default {
-  content: [
-    './app/**/*.{js,ts,jsx,tsx,mdx}',
-    './lib/**/*.{js,ts,jsx,tsx,mdx}',
-  ],
+  content: ['./app/**/*.{js,ts,jsx,tsx,mdx}', './lib/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
       /**
@@ -14,25 +11,25 @@ export default {
        */
       colors: {
         cx: {
-          50:  'rgb(var(--cx-50) / <alpha-value>)',   // 页面底色
-          100: 'rgb(var(--cx-100) / <alpha-value>)',  // 分隔线 / 浅填充
-          200: 'rgb(var(--cx-200) / <alpha-value>)',  // 边框
-          300: 'rgb(var(--cx-300) / <alpha-value>)',  // 主色
-          400: 'rgb(var(--cx-400) / <alpha-value>)',  // 主色 hover
-          500: 'rgb(var(--cx-500) / <alpha-value>)',  // 强调 / 价格
-          600: 'rgb(var(--cx-600) / <alpha-value>)',  // 标题
-          700: 'rgb(var(--cx-700) / <alpha-value>)',  // 正文
-        }
+          50: 'rgb(var(--cx-50) / <alpha-value>)', // 页面底色
+          100: 'rgb(var(--cx-100) / <alpha-value>)', // 分隔线 / 浅填充
+          200: 'rgb(var(--cx-200) / <alpha-value>)', // 边框
+          300: 'rgb(var(--cx-300) / <alpha-value>)', // 主色
+          400: 'rgb(var(--cx-400) / <alpha-value>)', // 主色 hover
+          500: 'rgb(var(--cx-500) / <alpha-value>)', // 强调 / 价格
+          600: 'rgb(var(--cx-600) / <alpha-value>)', // 标题
+          700: 'rgb(var(--cx-700) / <alpha-value>)', // 正文
+        },
       },
       borderRadius: {
-        'bubble': '1.25rem',
+        bubble: '1.25rem',
       },
       boxShadow: {
-        'card': '0 8px 24px -8px rgb(var(--cx-shadow) / <alpha-value>)',
+        card: '0 8px 24px -8px rgb(var(--cx-shadow) / <alpha-value>)',
       },
       keyframes: {
         'fade-in': {
-          '0%':   { opacity: '0', transform: 'translateY(6px)' },
+          '0%': { opacity: '0', transform: 'translateY(6px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
       },
@@ -42,4 +39,4 @@ export default {
     },
   },
   plugins: [],
-} satisfies Config
+} satisfies Config;

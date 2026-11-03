@@ -5,17 +5,12 @@
 // 两条路的错误处理与兜底策略不同，混在一起会让两边都难改，所以分开。
 // 但两者共用 lib/rules/patterns.ts 里的同一份正则，口径不会分叉。
 
-import {
-  HONORIFIC_PATTERN,
-  INTERNAL_LEAK_PATTERN,
-  PROFANITY_PATTERN,
-  ZERO_WIDTH_PATTERN,
-} from "@/lib/rules/patterns";
-import { buildSystemPrompt, buildChatPrompt } from "@/lib/prompts/system-prompt";
-import type { BrainContext, ChatMessage, Filters } from "./index";
-import { resolveRuntimes, CHAT_TEMPERATURE } from "./index";
+import { ZERO_WIDTH_PATTERN } from '@/lib/rules/patterns';
+import { buildSystemPrompt, buildChatPrompt } from '@/lib/prompts/system-prompt';
+import type { BrainContext, ChatMessage, Filters } from './index';
+import { resolveRuntimes, CHAT_TEMPERATURE } from './index';
 // 与 lib/llm/index.ts 同一套口径：报错行带 TraceID 前缀，TraceID 从请求上下文取
-import { tracePrefix } from "@/lib/chat/trace";
+import { tracePrefix } from '@/lib/chat/trace';
 
 /** 等首字的耐心：模型开口前最多等这么久 */
 const FIRST_TOKEN_TIMEOUT_MS = 8_000;
@@ -26,32 +21,32 @@ const TOTAL_STREAM_TIMEOUT_MS = 30_000;
 /** 流式通道里吐出来的东西 */
 export type BrainStreamEvent =
   /** reply 新增了一段，可以立刻上屏 */
-  | { type: "delta"; text: string }
+  | { type: 'delta'; text: string }
   /** 整段原始文本，流结束时给一次，交给上层做完整解析和兜底 */
-  | { type: "raw"; content: string };
+  | { type: 'raw'; content: string };
 
 /** 把 SSE 响应按 data 行逐条吐出来 */
 async function* readSSE(res: Response): AsyncGenerator<string> {
   const reader = res.body?.getReader();
-  if (!reader) throw new Error("响应体不可读");
+  if (!reader) throw new Error('响应体不可读');
 
   const decoder = new TextDecoder();
-  let buf = "";
+  let buf = '';
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
     buf += decoder.decode(value, { stream: true });
-    const lines = buf.split("\n");
+    const lines = buf.split('\n');
     // 最后一段可能是不完整的一行，留在 buffer 里等下一块，别急着解析
-    buf = lines.pop() ?? "";
+    buf = lines.pop() ?? '';
 
     for (const line of lines) {
       const t = line.trim();
-      if (!t.startsWith("data:")) continue;
+      if (!t.startsWith('data:')) continue;
       const data = t.slice(5).trim();
-      if (data === "[DONE]") return;
+      if (data === '[DONE]') return;
       if (data) yield data;
     }
   }
@@ -68,7 +63,7 @@ async function* readSSE(res: Response): AsyncGenerator<string> {
  */
 export function deltaReply(
   buffer: string,
-  consumed: number
+  consumed: number,
 ): { text: string; consumed: number; closed: boolean } {
   const key = /"reply"\s*:\s*"/.exec(buffer);
 
@@ -81,8 +76,8 @@ export function deltaReply(
     //
     // 不分的话，第 2 种情况会一个 delta 都不吐，流式等于白做。
     const trimmed = buffer.trimStart();
-    if (!trimmed || trimmed.startsWith("{")) {
-      return { text: "", consumed, closed: false };
+    if (!trimmed || trimmed.startsWith('{')) {
+      return { text: '', consumed, closed: false };
     }
     return {
       text: buffer.slice(consumed),
@@ -92,12 +87,12 @@ export function deltaReply(
   }
 
   let i = key.index + key[0].length;
-  let decoded = "";
+  let decoded = '';
 
   while (i < buffer.length) {
     const ch = buffer[i];
 
-    if (ch === "\\") {
+    if (ch === '\\') {
       // 转义符落在块尾、或 \u 后面没收够 4 位 → 等下一块，别吐半个字
       if (i + 1 >= buffer.length) break;
       const esc = decodeEscape(buffer, i);
@@ -131,21 +126,21 @@ function decodeEscape(s: string, i: number): { text: string; len: number } {
   const c = s[i + 1];
   const simple: Record<string, string> = {
     '"': '"',
-    "\\": "\\",
-    "/": "/",
-    b: "\b",
-    f: "\f",
-    n: "\n",
-    r: "\r",
-    t: "\t",
+    '\\': '\\',
+    '/': '/',
+    b: '\b',
+    f: '\f',
+    n: '\n',
+    r: '\r',
+    t: '\t',
   };
   if (c in simple) return { text: simple[c], len: 2 };
-  if (c === "u") {
+  if (c === 'u') {
     const hex = s.slice(i + 2, i + 6);
     if (/^[0-9a-fA-F]{4}$/.test(hex)) {
       return { text: String.fromCharCode(parseInt(hex, 16)), len: 6 };
     }
-    return { text: "", len: 0 }; // \u00 只到了一半
+    return { text: '', len: 0 }; // \u00 只到了一半
   }
   return { text: s[i], len: 1 };
 }
@@ -189,18 +184,18 @@ export async function* streamBrain(
    * 温度走陪聊档。与 `callBrain` 的 `routeIntent` 分流同源——
    * 两条入口的陪聊必须是同一副口气，否则用户换个入口就像换了一个人。
    */
-  chatOnly = false
+  chatOnly = false,
 ): AsyncGenerator<BrainStreamEvent> {
   const lastMsg = messages[messages.length - 1];
   const fullMessages: ChatMessage[] = [
     {
-      role: "system",
+      role: 'system',
       content: chatOnly
         ? buildChatPrompt(ctx?.memoryText)
         : buildSystemPrompt(filters, ctx?.memoryText),
     },
     ...messages.slice(0, -1),
-    { role: "user", content: lastMsg.content },
+    { role: 'user', content: lastMsg.content },
   ];
 
   for (const rt of resolveRuntimes()) {
@@ -212,9 +207,9 @@ export async function* streamBrain(
       timers.push(setTimeout(() => ctrl.abort(), FIRST_TOKEN_TIMEOUT_MS));
 
       const res = await fetch(rt.url, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${rt.apiKey}`,
         },
         body: JSON.stringify({
@@ -236,32 +231,32 @@ export async function* streamBrain(
       // 开口了，换成整条流的上限
       timers.push(setTimeout(() => ctrl.abort(), TOTAL_STREAM_TIMEOUT_MS));
 
-      let buffer = "";
+      let buffer = '';
       let consumed = 0;
 
       for await (const data of readSSE(res)) {
-        let chunk = "";
+        let chunk = '';
         try {
           const j = JSON.parse(data);
-          chunk = j?.choices?.[0]?.delta?.content || "";
+          chunk = j?.choices?.[0]?.delta?.content || '';
         } catch {
           continue; // 心跳行、不合法行，跳过
         }
         if (!chunk) continue;
 
         // C 类：字符级的清洗可以在流式路径上逐块做
-        buffer += chunk.replace(ZERO_WIDTH_PATTERN, "");
+        buffer += chunk.replace(ZERO_WIDTH_PATTERN, '');
 
         // 增量抠 reply：JSON 没拼完也能先把确定的字吐出去
         const d = deltaReply(buffer, consumed);
         if (d.text) {
           consumed = d.consumed;
-          yield { type: "delta", text: d.text };
+          yield { type: 'delta', text: d.text };
         }
       }
 
       // 流结束：整段原文交上去，由上层跑 B 类（语义）防呆与完整解析
-      yield { type: "raw", content: buffer };
+      yield { type: 'raw', content: buffer };
       return;
     } catch (err: any) {
       console.warn(`${tracePrefix()}[Brain:stream] ${rt.provider} 失败：`, err?.message);
@@ -270,5 +265,5 @@ export async function* streamBrain(
     }
   }
 
-  throw new Error("大脑流式响应失败");
+  throw new Error('大脑流式响应失败');
 }

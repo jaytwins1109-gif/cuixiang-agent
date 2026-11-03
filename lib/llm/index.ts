@@ -12,18 +12,7 @@ import {
   SPICY_WANT_PATTERN,
   PRICE_PATTERN,
   KNOWN_SHORT,
-  MEMORY_QUERY_PATTERN,
-  MEMORY_CLEAR_PATTERN,
-  MEMORY_DELETE_PATTERN,
-  MEMORY_KEYWORD_PATTERN,
-  PENDING_YES_PATTERN,
-  PENDING_NO_PATTERN,
-  QUALIFIED_ANSWER_PATTERN,
   LEAD_IN_REPLY_PATTERN,
-  VAGUE_EAT_PATTERN,
-  GIFT_NEED_PATTERN,
-  NIGHT_PATTERN,
-  ZERO_WIDTH_PATTERN,
   HONORIFIC_PATTERN,
   PROFANITY_PATTERN,
   INTERNAL_LEAK_PATTERN,
@@ -35,20 +24,20 @@ import {
   SEAFOOD_ALLERGY_PATTERN,
   DAIRY_ALLERGY_PATTERN,
   CHEAP_PATTERN,
-} from "@/lib/rules/patterns";
-import { buildSystemPrompt, buildChatPrompt } from "@/lib/prompts/system-prompt";
-import { findLocalSnack } from "@/lib/llm/orchestrator";
-import { mentionsGoods } from "@/lib/llm/category-words";
+} from '@/lib/rules/patterns';
+import { buildSystemPrompt, buildChatPrompt } from '@/lib/prompts/system-prompt';
+import { findLocalSnack } from '@/lib/llm/orchestrator';
+import { mentionsGoods } from '@/lib/llm/category-words';
 // 这一层的报错行统一带 TraceID 前缀，重启后翻 dev.err.log 能顺藤摸瓜回到那一轮对话。
 // TraceID 由请求入口用 AsyncLocalStorage 包好（见 lib/chat/trace.ts），
 // 这里只读不传——把 traceId 当参数一层层传进来会污染这一整层的函数签名
-import { tracePrefix } from "@/lib/chat/trace";
+import { tracePrefix } from '@/lib/chat/trace';
 
-const DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
-const GLM_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+const GLM_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 
 export interface ChatMessage {
-  role: "system" | "user" | "assistant";
+  role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
@@ -70,7 +59,7 @@ export interface Preferences {
 }
 
 export interface BrainResponse {
-  intent: "chat" | "recommend" | "introduce";
+  intent: 'chat' | 'recommend' | 'introduce';
   reply?: string;
   preferences?: Preferences;
   /**
@@ -105,7 +94,7 @@ export interface Filters {
 function extractJson(raw: string): BrainResponse | null {
   const text = raw.trim();
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidates = [fence ? fence[1].trim() : "", text];
+  const candidates = [fence ? fence[1].trim() : '', text];
 
   for (const candidate of candidates) {
     if (!candidate) continue;
@@ -114,8 +103,8 @@ function extractJson(raw: string): BrainResponse | null {
     } catch {
       // 继续
     }
-    const start = candidate.indexOf("{");
-    const end = candidate.lastIndexOf("}");
+    const start = candidate.indexOf('{');
+    const end = candidate.lastIndexOf('}');
     if (start >= 0 && end > start) {
       try {
         return JSON.parse(candidate.slice(start, end + 1)) as BrainResponse;
@@ -132,8 +121,8 @@ function extractJson(raw: string): BrainResponse | null {
  * 模型偶尔会吐一串不可见字符当 reply，直接进 history 会把后面的对话全带偏。
  */
 export function cleanReply(raw?: string): string | undefined {
-  if (typeof raw !== "string") return undefined;
-  const t = raw.replace(/[\u200b-\u200f\u202a-\u202e\ufeff]/g, "").trim();
+  if (typeof raw !== 'string') return undefined;
+  const t = raw.replace(/[\u200b-\u200f\u202a-\u202e\ufeff]/g, '').trim();
   return t || undefined;
 }
 
@@ -164,29 +153,25 @@ function sanitizeModelReply(raw?: string): string | undefined {
     return undefined;
   }
 
-  return clean.replace(HONORIFIC_PATTERN, "你");
+  return clean.replace(HONORIFIC_PATTERN, '你');
 }
 
 /**
  * 【改动3】兜底：加介绍类关键词，避免"介绍一下"被当闲聊。
  */
 function guessIntent(raw: string): BrainResponse {
-  const recommendHit =
-    /推荐|来个|想吃|买点|买个|有啥好吃|有什么好吃|来点|整点|换一批|换一个/.test(
-      raw,
-    );
-  const introduceHit = /介绍|啥样|是什么|讲讲|说说|这个.*怎么样|怎么吃/.test(
+  const recommendHit = /推荐|来个|想吃|买点|买个|有啥好吃|有什么好吃|来点|整点|换一批|换一个/.test(
     raw,
   );
+  const introduceHit = /介绍|啥样|是什么|讲讲|说说|这个.*怎么样|怎么吃/.test(raw);
 
-  if (recommendHit) return { intent: "recommend" };
+  if (recommendHit) return { intent: 'recommend' };
   // 这里**故意不带商品名**：抠名字必须交给上层用**用户原话**做。
   // 拿模型输出去匹配的话，它随口提一句"海苔脆片原味装"就会被当成在介绍它。
   // 上层抠不出商品的 introduce 会降回陪聊（两条路的 introduce 分支）。
-  if (introduceHit)
-    return { intent: "introduce", preferences: { product_name: null } };
+  if (introduceHit) return { intent: 'introduce', preferences: { product_name: null } };
   // raw 可能是模型吐的一串空白，必须先洗再兜底，否则空气泡会直接飘到用户面前
-  return { intent: "chat", reply: sanitizeModelReply(raw) || UNCLEAR_REPLY };
+  return { intent: 'chat', reply: sanitizeModelReply(raw) || UNCLEAR_REPLY };
 }
 
 // ── 意图防呆 ──────────────────────────────────────
@@ -216,8 +201,7 @@ export function allowRecommend(text: string, ctx?: BrainContext): boolean {
   if (mentionsGoods(text)) return true;
   if (ctx?.inRecommendContext && ADJUST_PATTERN.test(text)) return true;
   // 追问偏好之后用户的回答（"不吃辣""要甜的"）是在报偏好，不是闲聊
-  if (ctx?.inRecommendContext && Object.keys(extractPrefsFromText(text)).length)
-    return true;
+  if (ctx?.inRecommendContext && Object.keys(extractPrefsFromText(text)).length) return true;
   // 答"随便/都行"或直接点头 = 让我们直接推
   if (ctx?.inRecommendContext && CONSENT_PATTERN.test(text)) return true;
   return false;
@@ -239,13 +223,10 @@ export function allowRecommend(text: string, ctx?: BrainContext): boolean {
  *   2. `allowRecommend` 放行 → 货是一定要出的，走结构化链路
  *   3. 其余 → 陪聊
  */
-export function routeIntent(
-  text: string,
-  ctx?: BrainContext,
-): BrainResponse["intent"] {
-  if (INTRODUCE_PATTERN.test(text) && findLocalSnack(text)) return "introduce";
-  if (allowRecommend(text, ctx)) return "recommend";
-  return "chat";
+export function routeIntent(text: string, ctx?: BrainContext): BrainResponse['intent'] {
+  if (INTRODUCE_PATTERN.test(text) && findLocalSnack(text)) return 'introduce';
+  if (allowRecommend(text, ctx)) return 'recommend';
+  return 'chat';
 }
 
 /**
@@ -258,10 +239,10 @@ export function routeIntent(
  * SSE 那份漏过防线，导致"画饼不出货"只在流式下复现，这种分叉靠比对查不完。
  */
 export function upgradeForUrge(
-  intent: BrainResponse["intent"],
+  intent: BrainResponse['intent'],
   text: string,
-): BrainResponse["intent"] {
-  if (intent === "chat" && URGE_PATTERN.test(text)) return "recommend";
+): BrainResponse['intent'] {
+  if (intent === 'chat' && URGE_PATTERN.test(text)) return 'recommend';
   return intent;
 }
 
@@ -275,7 +256,7 @@ export function upgradeForUrge(
 
 export function extractPrefsFromText(text: string): Preferences {
   const prefs: Preferences = {};
-  const t = text || "";
+  const t = text || '';
 
   // 忌口先行，优先级最高："不想吃辣"这类否定式必须拦在口味抽取之前，
   // 否则下面的 /吃辣/ 会把它抽成"想吃辣"——忌口直接反转成喜好，比丢失更糟。
@@ -284,39 +265,37 @@ export function extractPrefsFromText(text: string): Preferences {
   // 模型当轮填的 preferences 只用于本轮选品，能不能进"一直记着"全看这里抽不抽得到。
   // 所以过敏原必须覆盖全：漏一个就等于用户说了白说，后面每一轮都按没听见处理。
   const noSpicy = NO_SPICY_PATTERN.test(t);
-  if (noSpicy) prefs.avoid = "不吃辣";
-  else if (NO_SWEET_PATTERN.test(t)) prefs.avoid = "不吃甜";
-  else if (NO_SOUR_PATTERN.test(t)) prefs.avoid = "不吃酸";
-  else if (PEANUT_ALLERGY_PATTERN.test(t)) prefs.avoid = "花生过敏";
-  else if (NUT_ALLERGY_PATTERN.test(t)) prefs.avoid = "坚果过敏";
-  else if (SEAFOOD_ALLERGY_PATTERN.test(t)) prefs.avoid = "海鲜过敏";
-  else if (DAIRY_ALLERGY_PATTERN.test(t)) prefs.avoid = "乳制品过敏";
+  if (noSpicy) prefs.avoid = '不吃辣';
+  else if (NO_SWEET_PATTERN.test(t)) prefs.avoid = '不吃甜';
+  else if (NO_SOUR_PATTERN.test(t)) prefs.avoid = '不吃酸';
+  else if (PEANUT_ALLERGY_PATTERN.test(t)) prefs.avoid = '花生过敏';
+  else if (NUT_ALLERGY_PATTERN.test(t)) prefs.avoid = '坚果过敏';
+  else if (SEAFOOD_ALLERGY_PATTERN.test(t)) prefs.avoid = '海鲜过敏';
+  else if (DAIRY_ALLERGY_PATTERN.test(t)) prefs.avoid = '乳制品过敏';
 
-  if (CHEAP_PATTERN.test(t)) prefs.budget = "30元内";
+  if (CHEAP_PATTERN.test(t)) prefs.budget = '30元内';
 
   // 场景：聊到"看海/爬山/追剧"时想吃的，推荐要贴合场景，不能永远火鸡面辣条
-  if (/看海|海边|沙滩|吹海风|赶海/.test(t)) prefs.scene = "海边";
-  else if (/爬山|徒步|登山|郊游|野餐|踏青|出去玩|露营/.test(t))
-    prefs.scene = "户外";
-  else if (/追剧|看剧|看电影|刷剧|电影|剧集/.test(t)) prefs.scene = "看剧";
-  else if (/加班|熬夜|上班|深夜|打工|通宵/.test(t)) prefs.scene = "加班";
-  else if (/办公室|摸鱼|工位/.test(t)) prefs.scene = "办公室";
+  if (/看海|海边|沙滩|吹海风|赶海/.test(t)) prefs.scene = '海边';
+  else if (/爬山|徒步|登山|郊游|野餐|踏青|出去玩|露营/.test(t)) prefs.scene = '户外';
+  else if (/追剧|看剧|看电影|刷剧|电影|剧集/.test(t)) prefs.scene = '看剧';
+  else if (/加班|熬夜|上班|深夜|打工|通宵/.test(t)) prefs.scene = '加班';
+  else if (/办公室|摸鱼|工位/.test(t)) prefs.scene = '办公室';
 
   // 忌口命中后跳过对应口味分支，"不吃辣，来点甜的"要能同时拿到 avoid + flavor
-  if (!noSpicy && SPICY_WANT_PATTERN.test(t)) prefs.flavor = "辣味";
-  else if (!NO_SWEET_PATTERN.test(t) && /想吃甜|甜的|甜口|甜味/.test(t))
-    prefs.flavor = "甜味";
-  else if (/咸的|咸味/.test(t)) prefs.flavor = "咸味";
-  else if (/酸的|酸味/.test(t)) prefs.flavor = "酸味";
-  else if (/清淡|不油腻|清爽/.test(t)) prefs.flavor = "清淡";
+  if (!noSpicy && SPICY_WANT_PATTERN.test(t)) prefs.flavor = '辣味';
+  else if (!NO_SWEET_PATTERN.test(t) && /想吃甜|甜的|甜口|甜味/.test(t)) prefs.flavor = '甜味';
+  else if (/咸的|咸味/.test(t)) prefs.flavor = '咸味';
+  else if (/酸的|酸味/.test(t)) prefs.flavor = '酸味';
+  else if (/清淡|不油腻|清爽/.test(t)) prefs.flavor = '清淡';
 
   // 口感：以前本地完全不抽，全交给模型。后果是 texture 只有"模型当轮推测"这一个来源，
   // 追问闸（167988）根本分不清「用户说了要脆的」和「我们从"烦"脑补出嚼感」——
   // 于是"推荐个零食吧"这种裸要，模型顺手填个嚼感就把闸门绕过去了。
   // 用户明说的一律本地认下来，模型那份只当作补充。
-  if (/脆|酥|嘎嘣|咔嚓|咔滋/.test(t)) prefs.texture = "脆";
-  else if (/嚼劲|耐嚼|有嚼[头劲]|筋道|磨牙|嚼着/.test(t)) prefs.texture = "嚼感";
-  else if (/软的|绵软|入口即化|软糯/.test(t)) prefs.texture = "软";
+  if (/脆|酥|嘎嘣|咔嚓|咔滋/.test(t)) prefs.texture = '脆';
+  else if (/嚼劲|耐嚼|有嚼[头劲]|筋道|磨牙|嚼着/.test(t)) prefs.texture = '嚼感';
+  else if (/软的|绵软|入口即化|软糯/.test(t)) prefs.texture = '软';
 
   return prefs;
 }
@@ -326,7 +305,7 @@ function compactPrefs(prefs?: Preferences): Preferences {
   const out: Preferences = {};
   if (!prefs) return out;
   for (const [k, v] of Object.entries(prefs)) {
-    if (typeof v === "string" && v.trim() && v !== "null") {
+    if (typeof v === 'string' && v.trim() && v !== 'null') {
       out[k as keyof Preferences] = v.trim() as any;
     }
   }
@@ -345,18 +324,18 @@ export function mergedPrefs(userText: string, modelPrefs?: Preferences): Prefere
 /** 把最近几轮用户发言拼成一段，交给偏好抽取找场景 / 忌口 */
 export function recentUserText(messages: ChatMessage[], maxTurns = 4): string {
   return messages
-    .filter((m) => m.role === "user")
+    .filter((m) => m.role === 'user')
     .slice(-maxTurns)
     .map((m) => m.content)
-    .join(" ");
+    .join(' ');
 }
 
 /** 最后一条用户发言：兜底话术要拿它判断"是不是在说饿/馋" */
 function lastUserText(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") return messages[i].content || "";
+    if (messages[i].role === 'user') return messages[i].content || '';
   }
-  return "";
+  return '';
 }
 
 /**
@@ -365,11 +344,8 @@ function lastUserText(messages: ChatMessage[]): string {
  * 以前只能靠读对话内容反推"刚才是不是降级了"——复读机出了事，
  * 得拿用户截图一句句猜。降级本身不丢人，出了事查不到才丢人。
  */
-export function logDegraded(
-  reason: string,
-  extra?: Record<string, unknown>,
-): void {
-  console.warn(`${tracePrefix()}[Degrade]`, reason, extra ? JSON.stringify(extra) : "");
+export function logDegraded(reason: string, extra?: Record<string, unknown>): void {
+  console.warn(`${tracePrefix()}[Degrade]`, reason, extra ? JSON.stringify(extra) : '');
 }
 
 // 价格识别、短打招呼放行：见 lib/rules/patterns.ts 的 PRICE_PATTERN / KNOWN_SHORT
@@ -379,13 +355,13 @@ export function logDegraded(
  * 只拦没汉字的：有汉字就当正经输入交给模型，别误伤。
  */
 function isGibberish(text: string): boolean {
-  const t = (text || "").trim();
+  const t = (text || '').trim();
   if (!t) return true;
 
   // 有汉字（或中文标点/全角字符）→ 当正经中文输入
   if (/[\u4e00-\u9fff\u3000-\u303f\uff01-\uff5e]/.test(t)) return false;
 
-  const compact = t.replace(/[\s!.,?~…、，。！？]+/g, "");
+  const compact = t.replace(/[\s!.,?~…、，。！？]+/g, '');
   if (!compact) return false; // 纯标点/空白，模型接得住（"。。。"→"咋了"）
   if (KNOWN_SHORT.test(compact)) return false;
 
@@ -407,15 +383,15 @@ function isGibberish(text: string): boolean {
  * 反问句在中文里很容易读成质问——用户随手敲了个「说说」「嗯？」，
  * 回一句"嗯？"像在挑衅，等于把我们自己的解析失败怪到用户头上。
  */
-export const UNCLEAR_REPLY = "我没太听懂你的意思呢，可不可以再说一遍呀？";
+export const UNCLEAR_REPLY = '我没太听懂你的意思呢，可不可以再说一遍呀？';
 
 /** 乱码输入的人设内兜底，随机挑一句，避免每次都一样 */
 function pickGibberishReply(): string {
   const pool = [
     UNCLEAR_REPLY,
-    "手滑了吧，这几个字我看着有点懵",
-    "没看懂这几个字，再打一遍？",
-    "这打的是啥字，我知识库查无此词",
+    '手滑了吧，这几个字我看着有点懵',
+    '没看懂这几个字，再打一遍？',
+    '这打的是啥字，我知识库查无此词',
   ];
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -430,7 +406,7 @@ function keepTransitionOnly(reply?: string): string | undefined {
   if (!PRICE_PATTERN.test(text)) return text;
 
   const first = text
-    .split("\n")
+    .split('\n')
     .map((s) => s.trim())
     .find((s) => s && !PRICE_PATTERN.test(s));
 
@@ -475,14 +451,14 @@ export async function callChatOnly(
   hint?: string,
 ): Promise<string | undefined> {
   if (!messages.length) {
-    throw new Error("messages 为空");
+    throw new Error('messages 为空');
   }
 
   const lastMsg = messages[messages.length - 1];
   const full: ChatMessage[] = [
-    { role: "system", content: buildChatPrompt(ctx?.memoryText) + (hint || "") },
+    { role: 'system', content: buildChatPrompt(ctx?.memoryText) + (hint || '') },
     ...messages.slice(0, -1),
-    { role: "user", content: lastMsg.content },
+    { role: 'user', content: lastMsg.content },
   ];
 
   for (const rt of resolveRuntimes()) {
@@ -495,10 +471,7 @@ export async function callChatOnly(
         JSON.stringify(content).slice(0, 120),
       );
     } catch (err: any) {
-      console.error(
-        `${tracePrefix()}[Brain:chat:${rt.provider}]`,
-        err?.message || err,
-      );
+      console.error(`${tracePrefix()}[Brain:chat:${rt.provider}]`, err?.message || err);
     }
   }
   return undefined;
@@ -511,12 +484,9 @@ export async function callChatOnly(
  * 硬约束（忌口 / 口味 / 场景）本来就以本地 `extractPrefsFromText` 为准，
  * 少一份模型推测，反而不会出现"脑补的口味盖过用户原话"。
  */
-export function chatResponseFromText(
-  raw: string,
-  messages: ChatMessage[],
-): BrainResponse {
+export function chatResponseFromText(raw: string, messages: ChatMessage[]): BrainResponse {
   return {
-    intent: "chat",
+    intent: 'chat',
     reply: cleanReply(raw),
     preferences: mergedPrefs(recentUserText(messages)),
     chatOnly: true,
@@ -540,8 +510,8 @@ function splitSentences(text: string): string[] {
  */
 function stripPitchSentences(text: string): string {
   const parts = splitSentences(text);
-  if (parts.length < 2) return RECOMMEND_PITCH_PATTERN.test(text) ? "" : text;
-  return parts.filter((s) => !RECOMMEND_PITCH_PATTERN.test(s)).join("");
+  if (parts.length < 2) return RECOMMEND_PITCH_PATTERN.test(text) ? '' : text;
+  return parts.filter((s) => !RECOMMEND_PITCH_PATTERN.test(s)).join('');
 }
 
 /**
@@ -582,7 +552,7 @@ export async function settleChatReply(
       return undefined;
     }
     const trimmed = stripPitchSentences(clean);
-    return trimmed ? trimmed.replace(HONORIFIC_PATTERN, "你") : undefined;
+    return trimmed ? trimmed.replace(HONORIFIC_PATTERN, '你') : undefined;
   };
 
   const direct = take(raw);
@@ -593,9 +563,9 @@ export async function settleChatReply(
     if (rewritten) return rewritten;
   }
 
-  logDegraded("陪聊正文不可用，落本地话术池", {
+  logDegraded('陪聊正文不可用，落本地话术池', {
     userId: opts.userId,
-    raw: (raw || "").slice(0, 60),
+    raw: (raw || '').slice(0, 60),
   });
   // 兜底话术必须接得住上下文：prefs 用「最近几轮原文抠出来的」那份
   return pickCompanionReply(
@@ -620,9 +590,7 @@ async function runChatChain(
     messages,
     // 模型有说话、只是说了不该说的 → 让它自己重说一次；
     // 压根没说话（provider 挂了）就别再等一轮超时，直接落池
-    rewrite: raw
-      ? () => callChatOnly(messages, ctx, CHAT_NO_PITCH_HINT)
-      : undefined,
+    rewrite: raw ? () => callChatOnly(messages, ctx, CHAT_NO_PITCH_HINT) : undefined,
   });
 
   const res = chatResponseFromText(reply, messages);
@@ -638,60 +606,60 @@ async function runChatChain(
 const COMPANION_POOL: Record<string, string[]> = {
   // "嘴馋""饿了"抽不进 scene/emotion，单开一档——这时候用户离下单最近
   嘴馋: [
-    "馋了还是饿了？不管哪个，先说个方向呗——你是想辣得出汗，还是就想嘴里有点味儿？",
-    "嘴馋这事儿我熟。先挑个大方向：辣的、甜的，还是脆的？",
+    '馋了还是饿了？不管哪个，先说个方向呗——你是想辣得出汗，还是就想嘴里有点味儿？',
+    '嘴馋这事儿我熟。先挑个大方向：辣的、甜的，还是脆的？',
   ],
   加班: [
-    "上班呢？坐着熬是真磨人。要我给你配点嘴里能嚼着的，慢慢磨着时间会好过些？",
-    "还没下班啊，这班上的。要不要我来点提神的，撑过这一段？",
+    '上班呢？坐着熬是真磨人。要我给你配点嘴里能嚼着的，慢慢磨着时间会好过些？',
+    '还没下班啊，这班上的。要不要我来点提神的，撑过这一段？',
   ],
   办公室: [
-    "摸鱼被我逮着了。要不要我给你配点没声儿、不用舔手的，坐着慢慢嚼？",
-    "工位上干坐着最容易走神。来点能嚼的给你解解闷，要不要我挑挑？",
+    '摸鱼被我逮着了。要不要我给你配点没声儿、不用舔手的，坐着慢慢嚼？',
+    '工位上干坐着最容易走神。来点能嚼的给你解解闷，要不要我挑挑？',
   ],
   看剧: [
-    "看剧呢？没点粮配着总觉得少点啥。要不要我给你配点耐吃的？",
-    "这剧追到哪了。追剧不备点零食总觉得对不起剧情，要我给你挑两样不？",
+    '看剧呢？没点粮配着总觉得少点啥。要不要我给你配点耐吃的？',
+    '这剧追到哪了。追剧不备点零食总觉得对不起剧情，要我给你挑两样不？',
   ],
   海边: [
-    "看海呢，吹着风边走边嚼才对。要不要我给你挑点清爽不腻的？",
-    "海边的节奏就得慢，手里有点东西晃着才舒服。要我配点不？",
+    '看海呢，吹着风边走边嚼才对。要不要我给你挑点清爽不腻的？',
+    '海边的节奏就得慢，手里有点东西晃着才舒服。要我配点不？',
   ],
   户外: [
-    "出去玩啊，路上带点吃的才踏实。要不要我给你配点方便带的？",
-    "出门在外，包里塞点扛饿的准没错。要不要我挑几样方便揣着的？",
+    '出去玩啊，路上带点吃的才踏实。要不要我给你配点方便带的？',
+    '出门在外，包里塞点扛饿的准没错。要不要我挑几样方便揣着的？',
   ],
   烦: [
-    "听着就上火。先别想那些了——要不要我给你配点能泄愤的，辣一顿出出汗？",
-    "这谁受得了。要不要我给你配点嚼起来带劲的，把这口气顺出去？",
+    '听着就上火。先别想那些了——要不要我给你配点能泄愤的，辣一顿出出汗？',
+    '这谁受得了。要不要我给你配点嚼起来带劲的，把这口气顺出去？',
   ],
   生气: [
-    "听着就上火。先别想那些了——要不要我给你配点能泄愤的，嚼着出出气？",
-    "确实欠收拾。要不要我给你挑点带劲的，辣完一身汗爽一下？",
+    '听着就上火。先别想那些了——要不要我给你配点能泄愤的，嚼着出出气？',
+    '确实欠收拾。要不要我给你挑点带劲的，辣完一身汗爽一下？',
   ],
   难过: [
-    "嗯，怎么了？要不要我给你配点软乎的甜的，嘴里有点东西会好受点。",
-    "那就先缓缓。甜的治这一套，要不要我给你挑两样？",
+    '嗯，怎么了？要不要我给你配点软乎的甜的，嘴里有点东西会好受点。',
+    '那就先缓缓。甜的治这一套，要不要我给你挑两样？',
   ],
   丧: [
-    "嗯，那就先歇会儿。要不要我给你配点甜的，慢慢来。",
-    "打不起精神的时候，来点软乎的最解压。要不要我挑两样？",
+    '嗯，那就先歇会儿。要不要我给你配点甜的，慢慢来。',
+    '打不起精神的时候，来点软乎的最解压。要不要我挑两样？',
   ],
   无聊: [
-    "闲得发慌是吧，那你跟我聊聊也行。要不我给你挑点没吃过的新口味，换个新鲜感？",
-    "坐着干瞅是真难受，手边有能嚼的会好过点。要不要我给你配点？",
+    '闲得发慌是吧，那你跟我聊聊也行。要不我给你挑点没吃过的新口味，换个新鲜感？',
+    '坐着干瞅是真难受，手边有能嚼的会好过点。要不要我给你配点？',
   ],
   开心: [
-    "哟，心情不错啊。有好事值得配点好的，要不要我给你挑挑？",
-    "这得庆祝一下。要不要我配点平时不舍得买的？",
+    '哟，心情不错啊。有好事值得配点好的，要不要我给你挑挑？',
+    '这得庆祝一下。要不要我配点平时不舍得买的？',
   ],
 };
 
 /** 认不出场景/情绪时的通用兜底：同样先接住，再轻轻带一笔 */
 const COMPANION_DEFAULT_POOL = [
-  "嗯，我在。接着说呗——对了，这种时候嘴里有点东西嚼着会好过点，要不要我给你配点？",
-  "你说，我听着呢。要不要我顺便给挑点零食，边聊边吃？",
-  "哈哈，然后呢？聊归聊，要不要我给你配点能嚼的？",
+  '嗯，我在。接着说呗——对了，这种时候嘴里有点东西嚼着会好过点，要不要我给你配点？',
+  '你说，我听着呢。要不要我顺便给挑点零食，边聊边吃？',
+  '哈哈，然后呢？聊归聊，要不要我给你配点能嚼的？',
 ];
 
 /**
@@ -738,13 +706,9 @@ const LAST_COMPANION_MAX = 500;
  *   2. **再防复读**——同一个用户连着两轮撞同一句，读起来像卡带了。
  *      池子只有一句时没法换，硬换只会把自己绕进去，那种情况原样返回。
  */
-export function pickCompanionReply(
-  userId: string,
-  prefs: Preferences,
-  text = "",
-): string {
+export function pickCompanionReply(userId: string, prefs: Preferences, text = ''): string {
   const pool =
-    (/馋|饿了|肚子空/.test(text) ? COMPANION_POOL["嘴馋"] : undefined) ||
+    (/馋|饿了|肚子空/.test(text) ? COMPANION_POOL['嘴馋'] : undefined) ||
     (prefs.scene && COMPANION_POOL[prefs.scene]) ||
     (prefs.emotion && COMPANION_POOL[prefs.emotion]) ||
     COMPANION_DEFAULT_POOL;
@@ -767,7 +731,7 @@ export function pickCompanionReply(
  * 降级路径这一轮是没有卡片的——带着这种句子出去就是空头许诺，比不说话还糟。
  */
 function looksLikeRecommendPitch(text?: string): boolean {
-  return RECOMMEND_PITCH_PATTERN.test(text || "");
+  return RECOMMEND_PITCH_PATTERN.test(text || '');
 }
 
 /**
@@ -792,15 +756,13 @@ export async function fixEmptyPromise(
     messages,
     prefs: mergedPrefs(recentUserText(messages), prefs),
     // 模型有说话、只是说了不该说的 → 走纯陪聊链路让它自己重说一次
-    rewrite: reply
-      ? () => callChatOnly(messages, ctx, CHAT_NO_PITCH_HINT)
-      : undefined,
+    rewrite: reply ? () => callChatOnly(messages, ctx, CHAT_NO_PITCH_HINT) : undefined,
   });
   return settled || UNCLEAR_REPLY;
 }
 
 export interface BrainRuntime {
-  provider: "deepseek" | "glm";
+  provider: 'deepseek' | 'glm';
   url: string;
   apiKey: string;
   model: string;
@@ -808,24 +770,24 @@ export interface BrainRuntime {
 }
 
 export function resolveRuntimes(): BrainRuntime[] {
-  const preferred = (process.env.LLM_PROVIDER || "").trim();
-  const order: ("deepseek" | "glm")[] = [];
+  const preferred = (process.env.LLM_PROVIDER || '').trim();
+  const order: ('deepseek' | 'glm')[] = [];
 
-  if (preferred === "deepseek" || preferred === "glm") order.push(preferred);
-  (["deepseek", "glm"] as const).forEach((n) => {
+  if (preferred === 'deepseek' || preferred === 'glm') order.push(preferred);
+  (['deepseek', 'glm'] as const).forEach((n) => {
     if (!order.includes(n)) order.push(n);
   });
 
   const runtimes: BrainRuntime[] = [];
   for (const provider of order) {
-    if (provider === "deepseek") {
+    if (provider === 'deepseek') {
       const apiKey = process.env.DEEPSEEK_API_KEY;
       if (apiKey) {
         runtimes.push({
           provider,
           url: DEEPSEEK_API_URL,
           apiKey,
-          model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+          model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
           supportsJson: true,
         });
       }
@@ -836,7 +798,7 @@ export function resolveRuntimes(): BrainRuntime[] {
           provider,
           url: GLM_API_URL,
           apiKey,
-          model: process.env.GLM_MODEL || "glm-4.7-flash",
+          model: process.env.GLM_MODEL || 'glm-4.7-flash',
           supportsJson: false,
         });
       }
@@ -858,25 +820,20 @@ export function parseBrainResponse(raw: string): BrainResponse {
 
   // 保留 introduce 意图，不强制转 recommend
   const intent =
-    parsed.intent === "recommend" || parsed.intent === "introduce"
-      ? parsed.intent
-      : "chat";
+    parsed.intent === 'recommend' || parsed.intent === 'introduce' ? parsed.intent : 'chat';
 
   const reply = sanitizeModelReply(parsed.reply);
 
   return {
     intent,
     // chat 必须有话说，否则宁可给一句人设内的兜底，也不让空气泡飘出去
-    reply: reply || (intent === "chat" ? UNCLEAR_REPLY : undefined),
+    reply: reply || (intent === 'chat' ? UNCLEAR_REPLY : undefined),
     // 意图可能被上层改写（chat 升 recommend），偏好一律带上，省得改完就没得用了
     preferences: parsed.preferences,
   };
 }
 
-async function callProvider(
-  rt: BrainRuntime,
-  messages: ChatMessage[],
-): Promise<BrainResponse> {
+async function callProvider(rt: BrainRuntime, messages: ChatMessage[]): Promise<BrainResponse> {
   const content = await requestOnce(rt, messages);
   return parseBrainResponse(content);
 }
@@ -919,7 +876,7 @@ async function requestOnce(
   messages: ChatMessage[],
   opts: RequestOptions = {},
 ): Promise<string> {
-  let lastContent = "";
+  let lastContent = '';
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const streak = blankStreak.get(rt.provider) || 0;
@@ -927,10 +884,7 @@ async function requestOnce(
     // 连着空白达到上限，说明这家的 json_object 不靠谱，第一次也不再拿它赌。
     // 陪聊链路从头到尾都不套这个约束——它要的就是自由文本
     const useJson =
-      !opts.chatOnly &&
-      rt.supportsJson &&
-      attempt === 0 &&
-      streak < BLANK_STREAK_LIMIT;
+      !opts.chatOnly && rt.supportsJson && attempt === 0 && streak < BLANK_STREAK_LIMIT;
     // 温度：JSON 模式降 0.3 稳格式；解除约束后升温 0.9，让语气重新活起来。
     // 陪聊链路走 0.75——比结构化那档活，又不至于飘到跑题
     const temperature = opts.chatOnly
@@ -947,16 +901,16 @@ async function requestOnce(
 
     try {
       const res = await fetch(rt.url, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${rt.apiKey}`,
         },
         body: JSON.stringify({
           model: rt.model,
           messages,
           temperature,
-          ...(useJson ? { response_format: { type: "json_object" } } : {}),
+          ...(useJson ? { response_format: { type: 'json_object' } } : {}),
         }),
         signal: ctrl.signal,
       });
@@ -978,7 +932,7 @@ async function requestOnce(
         throw new Error(`${rt.provider} 返回了非法格式（不是 JSON）`);
       }
       const choice = data?.choices?.[0];
-      const content: string = choice?.message?.content || "";
+      const content: string = choice?.message?.content || '';
       lastContent = content;
 
       if (content.trim()) {
@@ -996,7 +950,7 @@ async function requestOnce(
         JSON.stringify(data?.usage),
       );
     } catch (err: any) {
-      const timedOut = err?.name === "AbortError";
+      const timedOut = err?.name === 'AbortError';
       if (!timedOut) throw err;
       // 卡住的这一轮作废，换一套参数（解除 json 约束 + 升温）再试一次
       console.warn(
@@ -1019,10 +973,10 @@ export async function callBrain(
   filters?: Filters,
   ctx?: BrainContext,
   /** 兜底话术防重复用：没有就传空串，退化为不防重 */
-  userId = "",
+  userId = '',
 ): Promise<BrainResponse> {
   if (!messages.length) {
-    throw new Error("messages 为空");
+    throw new Error('messages 为空');
   }
 
   const lastMsg = messages[messages.length - 1];
@@ -1030,18 +984,15 @@ export async function callBrain(
   // 乱码拦截：像随手乱敲的输入直接本地兜底——不浪费模型调用，
   // 也断了模型"顺着编"的路（它会接出"行了，能还没说完了"这种鬼话）
   if (isGibberish(lastMsg.content)) {
-    console.warn(
-      `${tracePrefix()}[Brain] 乱码输入，本地兜底：`,
-      JSON.stringify(lastMsg.content),
-    );
-    return { intent: "chat", reply: pickGibberishReply() };
+    console.warn(`${tracePrefix()}[Brain] 乱码输入，本地兜底：`, JSON.stringify(lastMsg.content));
+    return { intent: 'chat', reply: pickGibberishReply() };
   }
 
   const runtimes = resolveRuntimes();
   if (!runtimes.length) {
-    logDegraded("没有配置任何大脑，走本地链路兜底", { userId });
+    logDegraded('没有配置任何大脑，走本地链路兜底', { userId });
     return {
-      intent: "chat",
+      intent: 'chat',
       unavailable: true,
       preferences: mergedPrefs(recentUserText(messages)),
     };
@@ -1053,15 +1004,15 @@ export async function callBrain(
   // 判成 recommend / introduce 才走下面这条结构化链路（完整业务提示词 + json_object）。
   //
   // 旅游大巴宽松放行，危险品运输车严格检查——防线一道没拆，只是不再一刀切。
-  if (routeIntent(lastMsg.content, ctx) === "chat") {
+  if (routeIntent(lastMsg.content, ctx) === 'chat') {
     return await runChatChain(messages, ctx, userId);
   }
 
   // 【改动2】不再拼接 JSON_INSTRUCTION 到 user，格式已在 system 里
   const fullMessages: ChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(filters, ctx?.memoryText) },
+    { role: 'system', content: buildSystemPrompt(filters, ctx?.memoryText) },
     ...messages.slice(0, -1),
-    { role: "user", content: lastMsg.content },
+    { role: 'user', content: lastMsg.content },
   ];
 
   let lastErr: unknown;
@@ -1072,15 +1023,12 @@ export async function callBrain(
       // 「打听某个具体商品」优先于其它路由判断。
       // 放最前面是因为：模型看到"火鸡面啥样"偶尔会判成 recommend，
       // 若先走下面的 recommend 降级，就会 return 掉 chat 回复，这张卡片永远挂不上去。
-      if (
-        brainRes.intent !== "introduce" &&
-        INTRODUCE_PATTERN.test(lastMsg.content)
-      ) {
+      if (brainRes.intent !== 'introduce' && INTRODUCE_PATTERN.test(lastMsg.content)) {
         const hit = findLocalSnack(lastMsg.content);
         if (hit) {
           console.warn(`${tracePrefix()}[Brain] 用户在问商品，升级介绍：`, lastMsg.content);
           return {
-            intent: "introduce",
+            intent: 'introduce',
             reply: brainRes.reply,
             preferences: {
               ...mergedPrefs(recentUserText(messages), brainRes.preferences),
@@ -1104,14 +1052,8 @@ export async function callBrain(
       }
 
       // 防呆：模型看到"烦死/好累/上班好无聊"就想推零食泄愤，但用户根本没开口要
-      if (
-        brainRes.intent === "recommend" &&
-        !allowRecommend(lastMsg.content, ctx)
-      ) {
-        const prefs = mergedPrefs(
-          recentUserText(messages),
-          brainRes.preferences,
-        );
+      if (brainRes.intent === 'recommend' && !allowRecommend(lastMsg.content, ctx)) {
+        const prefs = mergedPrefs(recentUserText(messages), brainRes.preferences);
         // 降级不等于甩一句反问打发人。recommend 意图下模型通常不写 reply，
         // 直接兜底会让它听起来像在问"你是谁、你要干嘛"——先接住人，再慢慢引出零食。
         // 这一轮没有卡片，所以任何"我给你挑了三样"的空头许诺都得拦掉。
@@ -1119,17 +1061,14 @@ export async function callBrain(
         // **降级为陪聊也要走纯陪聊链路**：补写用 callChatOnly（精简提示词 + 自由输出），
         // 出口口径交给 settleChatReply，与正常陪聊轮完全一致——
         // 否则同一个"没开口要"的用户，在两条支路里听到两种口气。
-        const reply = await settleChatReply(
-          keepTransitionOnly(brainRes.reply),
-          {
-            userId,
-            messages,
-            prefs,
-            rewrite: () => callChatOnly(messages, ctx, CHAT_NO_PITCH_HINT),
-          },
-        );
+        const reply = await settleChatReply(keepTransitionOnly(brainRes.reply), {
+          userId,
+          messages,
+          prefs,
+          rewrite: () => callChatOnly(messages, ctx, CHAT_NO_PITCH_HINT),
+        });
 
-        logDegraded("判 recommend 但用户没开口要，降级陪伴", {
+        logDegraded('判 recommend 但用户没开口要，降级陪伴', {
           userId,
           msg: lastMsg.content,
           reply,
@@ -1137,7 +1076,7 @@ export async function callBrain(
         // 这一轮绝不出卡片：用户没点头，货一律压着。
         // 抛出问句 = 在铺垫，上层据此给前端 lead_in，用户下一轮点头才接得上推荐。
         return {
-          intent: "chat",
+          intent: 'chat',
           reply,
           preferences: prefs,
           chatOnly: true,
@@ -1148,40 +1087,31 @@ export async function callBrain(
       // 反向防呆：用户明明开口要了（或在推荐里改条件），模型却判成陪聊。
       // 文案去留一律交给 replyForUpgrade（默认留着，只砍带清单的和还在抛钩子的问句），
       // 别在这里另立口径——注释和实现对不上比没有注释更坑。
-      if (brainRes.intent === "chat" && allowRecommend(lastMsg.content, ctx)) {
+      if (brainRes.intent === 'chat' && allowRecommend(lastMsg.content, ctx)) {
         const reply = replyForUpgrade(brainRes.reply);
         console.warn(
-          `${tracePrefix()}[Brain] 判 chat 但用户在要东西，升级推荐（${reply ? "留过渡语" : "清空落本地过渡语"}）：`,
+          `${tracePrefix()}[Brain] 判 chat 但用户在要东西，升级推荐（${reply ? '留过渡语' : '清空落本地过渡语'}）：`,
           lastMsg.content,
         );
         return {
-          intent: "recommend",
+          intent: 'recommend',
           reply,
-          preferences: mergedPrefs(
-            recentUserText(messages),
-            brainRes.preferences,
-          ),
+          preferences: mergedPrefs(recentUserText(messages), brainRes.preferences),
         };
       }
 
       // 推荐意图：模型漏填的硬约束（尤其忌口）用本地抠出来的补上，它填过的以它为准
-      if (brainRes.intent === "recommend") {
+      if (brainRes.intent === 'recommend') {
         return {
           ...brainRes,
-          preferences: mergedPrefs(
-            recentUserText(messages),
-            brainRes.preferences,
-          ),
+          preferences: mergedPrefs(recentUserText(messages), brainRes.preferences),
         };
       }
 
       // 陪聊里嘴瓢：模型自己承诺了"我按XX给你挑了三样"，可陪聊轮是不出卡片的——
       // 话先出去了、货却没到，比什么都不说更糟。改写逻辑见 fixEmptyPromise，
       // SSE 那条路也调同一个函数，别在这里另写一份。
-      if (
-        brainRes.intent === "chat" &&
-        looksLikeRecommendPitch(brainRes.reply)
-      ) {
+      if (brainRes.intent === 'chat' && looksLikeRecommendPitch(brainRes.reply)) {
         // prefs 只传模型填的那份：本地兜底合并由 fixEmptyPromise 统一做，
         // 这里再拼一次，两条入口迟早又拼出两种口径
         const fixed = await fixEmptyPromise(
@@ -1201,14 +1131,14 @@ export async function callBrain(
     }
   }
 
-  logDegraded("大脑调用失败，走本地链路兜底", {
+  logDegraded('大脑调用失败，走本地链路兜底', {
     userId,
-    tried: runtimes.map((r) => r.provider).join(" → "),
-    error: (lastErr as Error)?.message || "未知错误",
+    tried: runtimes.map((r) => r.provider).join(' → '),
+    error: (lastErr as Error)?.message || '未知错误',
   });
 
   return {
-    intent: "chat",
+    intent: 'chat',
     unavailable: true,
     preferences: mergedPrefs(recentUserText(messages)),
   };

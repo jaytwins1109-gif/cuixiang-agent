@@ -18,8 +18,8 @@
 // 链路日志见 lib/chat/trace.ts：与 /api/ai 同一套 TraceID 打点，
 // 流式只是多了一条 [Local]「明确要货不上屏 delta」。
 
-import { NextRequest } from "next/server";
-import { streamBrain } from "@/lib/llm/brain-stream";
+import { NextRequest } from 'next/server';
+import { streamBrain } from '@/lib/llm/brain-stream';
 import {
   allowRecommend,
   callBrain,
@@ -35,11 +35,11 @@ import {
   logDegraded,
   type ChatMessage,
   type Filters,
-} from "@/lib/llm";
-import { INTRODUCE_PATTERN, LEAD_IN_REPLY_PATTERN } from "@/lib/rules/patterns";
-import { findLocalSnack } from "@/lib/llm/orchestrator";
-import { composeRecommendReply } from "@/lib/llm/reply-composer";
-import { recallMemory, renderMemoryForPrompt } from "@/lib/memory/store";
+} from '@/lib/llm';
+import { INTRODUCE_PATTERN, LEAD_IN_REPLY_PATTERN } from '@/lib/rules/patterns';
+import { findLocalSnack } from '@/lib/llm/orchestrator';
+import { composeRecommendReply, sanitizeTransition } from '@/lib/llm/reply-composer';
+import { recallMemory, renderMemoryForPrompt } from '@/lib/memory/store';
 import {
   newTraceId,
   traceRequest,
@@ -48,7 +48,7 @@ import {
   traceResponse,
   traceError,
   runWithTrace,
-} from "@/lib/chat/trace";
+} from '@/lib/chat/trace';
 import {
   normalizeUserId,
   handleMemoryIntent,
@@ -64,9 +64,9 @@ import {
   snapshot,
   pickTransition,
   withPendingQuestion,
-} from "@/lib/chat/handlers";
+} from '@/lib/chat/handlers';
 
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 
 interface StreamBody {
   message: string;
@@ -95,9 +95,7 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
 
       const send = (event: string, data: unknown) => {
         if (closed) return;
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
-        );
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
       const finish = () => {
         if (closed) return;
@@ -112,27 +110,21 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         traceResponse(
           traceId,
           payload.reply,
-          Array.isArray(payload.recommendations)
-            ? payload.recommendations.length
-            : 0,
+          Array.isArray(payload.recommendations) ? payload.recommendations.length : 0,
           {
             degraded: !!payload.degraded,
-            route: typeof payload.route === "string" ? payload.route : "-",
+            route: typeof payload.route === 'string' ? payload.route : '-',
             awaiting: !!payload.awaiting_prefs,
           },
         );
-        send("final", { ...payload, trace_id: traceId });
+        send('final', { ...payload, trace_id: traceId });
         finish();
       };
 
       try {
         const body = (await req.json()) as StreamBody;
-        if (
-          !body?.message ||
-          typeof body.message !== "string" ||
-          !body.message.trim()
-        ) {
-          send("error", { message: "说点什么呀" });
+        if (!body?.message || typeof body.message !== 'string' || !body.message.trim()) {
+          send('error', { message: '说点什么呀' });
           finish();
           return;
         }
@@ -140,13 +132,13 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         const userId = normalizeUserId(body.userId || body.userProfile?.id);
         traceRequest(traceId, {
           message: body.message,
-          entry: "/api/ai/stream",
+          entry: '/api/ai/stream',
           userId,
         });
         const memory = await recallMemory(userId);
         const messages: ChatMessage[] = [
           ...(body.history || []).slice(-10),
-          { role: "user" as const, content: body.message },
+          { role: 'user' as const, content: body.message },
         ];
         const ctx = {
           inRecommendContext: body.inRecommendContext,
@@ -156,25 +148,15 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         // ── 阶段 1：输入侧正则（同步，零延迟）────────────────────
         // 判的是「用户说了什么」。输入是完整的，不存在分块问题，
         // 所以这些判断压根不参与流式——能本地办结的就直接办结，比流式还快。
-        send("stage", { stage: "memory" });
+        send('stage', { stage: 'memory' });
 
-        const memRes = await handleMemoryIntent(
-          userId,
-          body.message,
-          memory,
-          traceId,
-        );
+        const memRes = await handleMemoryIntent(userId, body.message, memory, traceId);
         if (memRes) {
           sendFinal(memRes);
           return;
         }
 
-        const pendingRes = await handlePendingConfirm(
-          userId,
-          body.message,
-          memory,
-          traceId,
-        );
+        const pendingRes = await handlePendingConfirm(userId, body.message, memory, traceId);
         if (pendingRes) {
           sendFinal(pendingRes);
           return;
@@ -182,19 +164,14 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
 
         // 硬要忌口货：本地回绝，不让模型看见这句话——它会让步，
         // 实测说过"你既然铁了心要变态辣鸡翅，那就点呗——8块"
-        const insistRes = await handleInsistAvoid(
-          userId,
-          body.message,
-          memory,
-          traceId,
-        );
+        const insistRes = await handleInsistAvoid(userId, body.message, memory, traceId);
         if (insistRes) {
           sendFinal(insistRes);
           return;
         }
 
         // ── 阶段 2：流式调大脑（只吐 reply，不吐商品清单）──────────
-        send("stage", { stage: "thinking" });
+        send('stage', { stage: 'thinking' });
 
         // 明确要货的句子（命中 BUY / URGE / 点名商品）：无论模型这轮说成什么，
         // 出口必定是推荐 / 介绍，它按陪聊写的那些字一句都不会上屏。
@@ -203,27 +180,18 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         // 让过渡语和卡片一起到
         // 按意图分流：与 callBrain 同源的 routeIntent，两条入口不许分叉。
         // 陪聊走纯陪聊链路（精简提示词 + 自由输出），推荐 / 介绍走结构化链路。
-        const chatOnly = routeIntent(body.message, ctx) === "chat";
+        const chatOnly = routeIntent(body.message, ctx) === 'chat';
         const definiteGoods = allowRecommend(body.message, ctx);
         if (definiteGoods) {
-          traceLocal(
-            traceId,
-            "明确要货（definiteGoods）",
-            "模型逐字不上屏，过渡语和卡片一起到",
-          );
+          traceLocal(traceId, '明确要货（definiteGoods）', '模型逐字不上屏，过渡语和卡片一起到');
         }
 
-        let raw = "";
+        let raw = '';
         try {
-          for await (const ev of streamBrain(
-            messages,
-            body.filters,
-            ctx,
-            chatOnly,
-          )) {
-            if (ev.type === "delta" && ev.text) {
-              if (!definiteGoods) send("delta", { text: ev.text });
-            } else if (ev.type === "raw") {
+          for await (const ev of streamBrain(messages, body.filters, ctx, chatOnly)) {
+            if (ev.type === 'delta' && ev.text) {
+              if (!definiteGoods) send('delta', { text: ev.text });
+            } else if (ev.type === 'raw') {
               raw = ev.content;
             }
           }
@@ -233,7 +201,7 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         }
 
         // ── 阶段 3：输出侧正则 + 选品（语义类必须整句判）───────────
-        send("stage", { stage: "finalizing" });
+        send('stage', { stage: 'finalizing' });
 
         // 流式一点没拿到（超时 / 网络断）→ 退回一次性调用，别让用户空手
         const brainRes = raw
@@ -246,7 +214,7 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
           : await callBrain(messages, body.filters, ctx, userId);
         traceBrain(
           traceId,
-          brainRes.unavailable ? "unavailable（大脑不可用）" : brainRes.intent,
+          brainRes.unavailable ? 'unavailable（大脑不可用）' : brainRes.intent,
           brainRes.preferences,
         );
 
@@ -266,8 +234,8 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
           });
           // 没有模型逐字吐字的来源了：把本地文案整块当一个 delta 发出去，
           // 占位气泡马上有字，final 到达时再按最终版本整体替换一次
-          if (typeof fallback.reply === "string" && fallback.reply) {
-            send("delta", { text: fallback.reply });
+          if (typeof fallback.reply === 'string' && fallback.reply) {
+            send('delta', { text: fallback.reply });
           }
           sendFinal(fallback);
           return;
@@ -276,40 +244,39 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         // 意图纠偏：与 callBrain 里那三道判断同源。
         // 不做的话，流式路径会退化成"模型说啥就是啥"，人设里的防呆形同虚设。
         let intent = brainRes.intent;
-        if (intent !== "introduce" && INTRODUCE_PATTERN.test(body.message)) {
+        if (intent !== 'introduce' && INTRODUCE_PATTERN.test(body.message)) {
           const hit = findLocalSnack(body.message);
           if (hit) {
-            traceLocal(traceId, "意图纠偏:打听商品", `${intent} → introduce`);
-            intent = "introduce";
+            traceLocal(traceId, '意图纠偏:打听商品', `${intent} → introduce`);
+            intent = 'introduce';
           }
         }
         // 催货升级（"你说说""哪几样呢"）：与 callBrain 同源，必须放在降级之前
         const urged = upgradeForUrge(intent, body.message);
         if (urged !== intent) {
-          traceLocal(traceId, "意图纠偏:用户在催货", `${intent} → ${urged}`);
+          traceLocal(traceId, '意图纠偏:用户在催货', `${intent} → ${urged}`);
           intent = urged;
           // 同 callBrain：模型这句是按陪聊写的（"说啥？没头没尾"），
           // 留着会变成"嘴上说接不住、下面甩三张卡"，清空让它落本地过渡语
           brainRes.reply = undefined;
         }
-        if (intent === "recommend" && !allowRecommend(body.message, ctx)) {
-          traceLocal(traceId, "意图纠偏:用户没开口要", "recommend → chat，本轮不出卡片");
-          intent = "chat";
+        if (intent === 'recommend' && !allowRecommend(body.message, ctx)) {
+          traceLocal(traceId, '意图纠偏:用户没开口要', 'recommend → chat，本轮不出卡片');
+          intent = 'chat';
         }
 
         // 判了 introduce 却从用户原话里抠不出商品名 → 降回陪聊。
         // 否则出口只能吐"emmm 这个我还不太了解"——那是把我们的解析失败甩给用户
-        if (intent === "introduce") {
+        if (intent === 'introduce') {
           const hit =
-            findLocalSnack(brainRes.preferences?.product_name) ||
-            findLocalSnack(body.message);
+            findLocalSnack(brainRes.preferences?.product_name) || findLocalSnack(body.message);
           if (!hit) {
-            logDegraded("introduce 但抠不出商品名，降陪聊", {
+            logDegraded('introduce 但抠不出商品名，降陪聊', {
               userId,
               msg: body.message,
             });
-            traceLocal(traceId, "introduce 抠不出商品名", "降回陪聊");
-            intent = "chat";
+            traceLocal(traceId, 'introduce 抠不出商品名', '降回陪聊');
+            intent = 'chat';
           }
         }
 
@@ -317,18 +284,18 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         // 用户明明开口要了（"最近心痒痒，想吃零食"），模型却判成陪聊 → 升 recommend。
         // 漏了它，"想吃零食"会落进本地陪聊池回一句"哈哈，然后呢？聊归聊"，
         // 货不见踪影。文案去留口径见 replyForUpgrade
-        if (intent === "chat" && allowRecommend(body.message, ctx)) {
-          traceLocal(traceId, "意图纠偏:用户在要东西", "chat → recommend");
-          intent = "recommend";
+        if (intent === 'chat' && allowRecommend(body.message, ctx)) {
+          traceLocal(traceId, '意图纠偏:用户在要东西', 'chat → recommend');
+          intent = 'recommend';
           brainRes.reply = replyForUpgrade(brainRes.reply);
-          logDegraded("判 chat 但用户在要东西，升级推荐（SSE）", {
+          logDegraded('判 chat 但用户在要东西，升级推荐（SSE）', {
             userId,
             msg: body.message,
           });
         }
 
         // 陪聊：本轮不出卡片
-        if (intent === "chat") {
+        if (intent === 'chat') {
           // 偏好要本地抠 + 模型填合过才写记忆：模型在陪聊轮常把 preferences 留空，
           // 只用它那份，"今天想辣的发泄"就抽不出 flavor，撞忌口的冲突认不出来
           const mem = await syncMemory(
@@ -349,23 +316,18 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
             ctx,
           );
           const reply = guardReply(
-            withPendingQuestion(
-              stripFakeList(fixed, traceId) || UNCLEAR_REPLY,
-              mem.question,
-            ),
+            withPendingQuestion(stripFakeList(fixed, traceId) || UNCLEAR_REPLY, mem.question),
             memory,
             traceId,
           );
           sendFinal({
-            route: "direct",
+            route: 'direct',
             reply,
             profile: cleanProfile(body.message, brainRes.preferences),
             // 钩子判定与 /api/ai 同一条口径：只有往零食方向抛的问句才算铺垫。
             // 以前这里图省事判 /[?？]/，陪聊追问细节（"因为啥吵的？"）也被标成钩子，
             // 下一轮用户回个"嗯"就被 CONSENT_PATTERN 当点头，凭空甩出卡片
-            ...(brainRes.leadIn || LEAD_IN_REPLY_PATTERN.test(reply)
-              ? { lead_in: true }
-              : {}),
+            ...(brainRes.leadIn || LEAD_IN_REPLY_PATTERN.test(reply) ? { lead_in: true } : {}),
             memory: snapshot(await recallMemory(userId)),
           });
           return;
@@ -377,20 +339,15 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         const freshMemory = await recallMemory(userId);
 
         // 介绍单品
-        if (intent === "introduce") {
-          const card =
-            findLocalSnack(prefs.product_name) || findLocalSnack(body.message);
+        if (intent === 'introduce') {
+          const card = findLocalSnack(prefs.product_name) || findLocalSnack(body.message);
           // 点名的货撞上忌口 / 过敏 → 卡片不给，话也换成劝阻的
           const blocked = cardBlocked(card, freshMemory, traceId);
           sendFinal({
-            route: "direct",
+            route: 'direct',
             reply: blocked
-              ? `这个我得拦一下——${blocked.replace(/^用户/, "你")}，${card?.name}就不给你推了。换个别的？`
-              : guardReply(
-                  brainRes.reply?.trim() || "emmm 这个我还不太了解",
-                  freshMemory,
-                  traceId,
-                ),
+              ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card?.name}就不给你推了。换个别的？`
+              : guardReply(brainRes.reply?.trim() || 'emmm 这个我还不太了解', freshMemory, traceId),
             profile: cleanProfile(body.message, prefs),
             ...(card && !blocked ? { recommendations: [card] } : {}),
             memory: snapshot(freshMemory),
@@ -399,27 +356,23 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         }
 
         // 推荐
-        const { recommendations, degraded, workflow } = await runRecommendation(
-          {
-            message: body.message,
-            recentText: recentUserText(messages),
-            prefs,
-            userProfile: body.userProfile,
-            filters: body.filters,
-            inRecommendContext: body.inRecommendContext,
-            exclude: Array.isArray(body.lastPicks) ? body.lastPicks : [],
-            userId,
-            memory: freshMemory,
-            traceId,
-          },
-        );
+        const { recommendations, degraded, workflow } = await runRecommendation({
+          message: body.message,
+          recentText: recentUserText(messages),
+          prefs,
+          userProfile: body.userProfile,
+          filters: body.filters,
+          inRecommendContext: body.inRecommendContext,
+          exclude: Array.isArray(body.lastPicks) ? body.lastPicks : [],
+          userId,
+          memory: freshMemory,
+          traceId,
+        });
 
         if (!recommendations.length) {
           sendFinal({
-            route: "direct",
-            reply:
-              workflow?.follow_up ||
-              "emmm 这个条件有点刁钻，换宽松点我再给你找？",
+            route: 'direct',
+            reply: workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？',
             awaiting_prefs: !!workflow?.follow_up,
             profile: cleanProfile(body.message, prefs),
             memory: snapshot(freshMemory),
@@ -427,9 +380,10 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
           return;
         }
 
-        // 模型的开头也可能嘴上提忌口货（卡片是干净的），出口前再扫一遍
+        // 模型的开头也可能嘴上提忌口货（卡片是干净的），出口前再扫一遍；
+        // 自己写的"1. XX｜X元"清单和"你先说句随便"这类漏内部逻辑的句子先切掉
         const transition = guardReply(
-          brainRes.reply?.trim() || pickTransition(prefs, body.filters),
+          sanitizeTransition(brainRes.reply) || pickTransition(prefs, body.filters),
           freshMemory,
           traceId,
         );
@@ -443,10 +397,10 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
           : transition;
 
         // 卡片先发：前端可以先把骨架渲染出来，再等 final 的完整文案
-        send("cards", { recommendations });
+        send('cards', { recommendations });
 
         sendFinal({
-          route: "workflow",
+          route: 'workflow',
           reply: withPendingQuestion(reply, mem.question),
           recommendations,
           profile: cleanProfile(body.message, prefs),
@@ -455,8 +409,8 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
           memory: snapshot(freshMemory),
         });
       } catch (err: any) {
-        traceError("Stream Error", err, traceId);
-        send("error", { message: "服务出了点问题，再说一次？", trace_id: traceId });
+        traceError('Stream Error', err, traceId);
+        send('error', { message: '服务出了点问题，再说一次？', trace_id: traceId });
         finish();
       }
     },
@@ -464,11 +418,11 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
       // 关掉 Nginx 一类反代的缓冲，否则 SSE 会被攒成一大块再吐，流式就白做了
-      "X-Accel-Buffering": "no",
+      'X-Accel-Buffering': 'no',
     },
   });
 }

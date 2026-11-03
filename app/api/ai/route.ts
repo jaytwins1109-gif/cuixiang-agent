@@ -8,8 +8,8 @@
 // 链路日志见 lib/chat/trace.ts：一次请求一个 TraceID，
 // [Request] / [Brain] / [Local] / [Response] 四个打点，scripts/capture-log.mjs 靠它们归档。
 
-import { NextRequest, NextResponse } from "next/server";
-import { LEAD_IN_REPLY_PATTERN } from "@/lib/rules/patterns";
+import { NextRequest, NextResponse } from 'next/server';
+import { LEAD_IN_REPLY_PATTERN } from '@/lib/rules/patterns';
 import {
   callBrain,
   mergedPrefs,
@@ -18,10 +18,10 @@ import {
   logDegraded,
   type ChatMessage,
   type Filters,
-} from "@/lib/llm";
-import { findLocalSnack } from "@/lib/llm/orchestrator";
-import { composeRecommendReply } from "@/lib/llm/reply-composer";
-import { recallMemory, renderMemoryForPrompt } from "@/lib/memory/store";
+} from '@/lib/llm';
+import { findLocalSnack } from '@/lib/llm/orchestrator';
+import { composeRecommendReply, sanitizeTransition } from '@/lib/llm/reply-composer';
+import { recallMemory, renderMemoryForPrompt } from '@/lib/memory/store';
 import {
   newTraceId,
   traceRequest,
@@ -30,7 +30,7 @@ import {
   traceResponse,
   traceError,
   runWithTrace,
-} from "@/lib/chat/trace";
+} from '@/lib/chat/trace';
 import {
   normalizeUserId,
   handleMemoryIntent,
@@ -46,9 +46,9 @@ import {
   snapshot,
   pickTransition,
   withPendingQuestion,
-} from "@/lib/chat/handlers";
+} from '@/lib/chat/handlers';
 
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 
 interface AiRequestBody {
   message: string;
@@ -69,40 +69,34 @@ export async function POST(req: NextRequest) {
   const traceId = newTraceId();
   try {
     const body = (await req.json()) as AiRequestBody;
-    if (
-      !body?.message ||
-      typeof body.message !== "string" ||
-      !body.message.trim()
-    ) {
-      return NextResponse.json({ error: "说点什么呀" }, { status: 400 });
+    if (!body?.message || typeof body.message !== 'string' || !body.message.trim()) {
+      return NextResponse.json({ error: '说点什么呀' }, { status: 400 });
     }
 
     const userId = normalizeUserId(body.userId || body.userProfile?.id);
     traceRequest(traceId, {
       message: body.message,
-      entry: "/api/ai",
+      entry: '/api/ai',
       userId,
     });
 
     // 整轮包进 trace 上下文：lib/llm 深处的报错（provider 挂了、超时重试、降级）
     // 不用把 traceId 当参数一层层传下去，直接问上下文要就行
-    const payload = await runWithTrace(traceId, () =>
-      handleTurn({ traceId, body, userId }),
-    );
+    const payload = await runWithTrace(traceId, () => handleTurn({ traceId, body, userId }));
 
     // [Response] 只有一个出口：所有分支的响应体都从这里出去，不会漏打
     traceResponse(traceId, payload.reply, cardCountOf(payload), {
       degraded: !!payload.degraded,
-      route: typeof payload.route === "string" ? payload.route : "-",
+      route: typeof payload.route === 'string' ? payload.route : '-',
       awaiting: !!payload.awaiting_prefs,
     });
     // trace_id 回给调用方：界面上看到的那一句，能直接对上日志里那几行
     return NextResponse.json({ ...payload, trace_id: traceId });
   } catch (err: any) {
     // 走 traceError：stderr 里也要有 TraceID，重启后翻 dev.err.log 才对得上人
-    traceError("AI Route Error", err, traceId);
+    traceError('AI Route Error', err, traceId);
     return NextResponse.json(
-      { error: err?.message || "服务出了点问题", trace_id: traceId },
+      { error: err?.message || '服务出了点问题', trace_id: traceId },
       { status: 500 },
     );
   }
@@ -110,9 +104,7 @@ export async function POST(req: NextRequest) {
 
 /** 响应体里出了几张卡：[Response] 打点只关心这个数字 */
 function cardCountOf(payload: Record<string, unknown>): number {
-  return Array.isArray(payload.recommendations)
-    ? payload.recommendations.length
-    : 0;
+  return Array.isArray(payload.recommendations) ? payload.recommendations.length : 0;
 }
 
 /**
@@ -135,35 +127,20 @@ async function handleTurn({
   const memory = await recallMemory(userId);
   const messages: ChatMessage[] = [
     ...(body.history || []).slice(-10),
-    { role: "user" as const, content: body.message },
+    { role: 'user' as const, content: body.message },
   ];
 
   // 2. 记忆的查询 / 删除 / 清空：本地就能办结，不必惊动大脑（省一次往返）
-  const memRes = await handleMemoryIntent(
-    userId,
-    body.message,
-    memory,
-    traceId,
-  );
+  const memRes = await handleMemoryIntent(userId, body.message, memory, traceId);
   if (memRes) return memRes;
 
   // 2.5 待确认闭环：上轮抛过「你之前说过 X，现在改口了？」，这轮给答复就本地办结
-  const pendingRes = await handlePendingConfirm(
-    userId,
-    body.message,
-    memory,
-    traceId,
-  );
+  const pendingRes = await handlePendingConfirm(userId, body.message, memory, traceId);
   if (pendingRes) return pendingRes;
 
   // 2.6 硬要忌口货：本地直接回绝。
   // 交给模型的话它会让步（实测说过"那就点呗——8块"），这轮不该让它看见这句话
-  const insistRes = await handleInsistAvoid(
-    userId,
-    body.message,
-    memory,
-    traceId,
-  );
+  const insistRes = await handleInsistAvoid(userId, body.message, memory, traceId);
   if (insistRes) return insistRes;
 
   // 3. 大脑：判断意图 + 抽偏好 + 说人话
@@ -179,7 +156,7 @@ async function handleTurn({
   );
   traceBrain(
     traceId,
-    brainRes.unavailable ? "unavailable（大脑不可用）" : brainRes.intent,
+    brainRes.unavailable ? 'unavailable（大脑不可用）' : brainRes.intent,
     brainRes.preferences,
   );
 
@@ -201,17 +178,15 @@ async function handleTurn({
 
   // 判了 introduce 却从用户原话里抠不出商品名 → 降回陪聊。
   // 否则出口只能吐"emmm 这个我还不太了解"——那是把我们的解析失败甩给用户
-  if (brainRes.intent === "introduce") {
-    const hit =
-      findLocalSnack(brainRes.preferences?.product_name) ||
-      findLocalSnack(body.message);
+  if (brainRes.intent === 'introduce') {
+    const hit = findLocalSnack(brainRes.preferences?.product_name) || findLocalSnack(body.message);
     if (!hit) {
-      logDegraded("introduce 但抠不出商品名，降陪聊", {
+      logDegraded('introduce 但抠不出商品名，降陪聊', {
         userId,
         msg: body.message,
       });
-      traceLocal(traceId, "introduce 抠不出商品名", "降回陪聊，不吐自曝失败的话术");
-      brainRes.intent = "chat";
+      traceLocal(traceId, 'introduce 抠不出商品名', '降回陪聊，不吐自曝失败的话术');
+      brainRes.intent = 'chat';
     }
   }
 
@@ -222,7 +197,7 @@ async function handleTurn({
   // 提示词只有人设 + 长期记忆 + 时间、温度 0.75，出口只守红线（内部信息 / 脏话 / 空头许诺）。
   // 推荐 / 介绍仍旧是完整业务提示词 + json_object 的严格结构化链路。
   // 下面这一段两条链路共用：卡片和忌口相关的硬闸一条都不能少。
-  if (brainRes.intent === "chat") {
+  if (brainRes.intent === 'chat') {
     // 偏好必须本地抠 + 模型填合过再写记忆：模型在陪聊轮常把 preferences 留空，
     // 只用它填的那份，"今天想辣的发泄"这种就抽不出 flavor，
     // 撞忌口的冲突根本认不出来，改口确认这条链路一直是断的
@@ -234,7 +209,7 @@ async function handleTurn({
       traceId,
     );
     // 陪聊轮没有卡片，模型却自己编了"1. XX｜X元"的清单 → 截掉，只留安抚语
-    const stripped = stripFakeList(brainRes.reply?.trim() || "", traceId);
+    const stripped = stripFakeList(brainRes.reply?.trim() || '', traceId);
     const chatReply = guardReply(
       withPendingQuestion(stripped || UNCLEAR_REPLY, mem.question),
       memory,
@@ -244,7 +219,7 @@ async function handleTurn({
     // 否则"铺垫出去、用户答应了、我们继续陪聊"会把人晾在那儿。
     const leadIn = brainRes.leadIn || LEAD_IN_REPLY_PATTERN.test(chatReply);
     return {
-      route: "direct",
+      route: 'direct',
       reply: chatReply,
       profile: cleanProfile(body.message, brainRes.preferences),
       ...(leadIn ? { lead_in: true } : {}),
@@ -260,21 +235,16 @@ async function handleTurn({
 
   // 介绍：文案 + 能配上就挂一张卡片。
   // product_name 偶尔会被模型漏填，这时拿用户原话再找一次（"火鸡面啥样"里就有名字）
-  if (brainRes.intent === "introduce") {
-    const card =
-      findLocalSnack(prefs.product_name) || findLocalSnack(body.message);
+  if (brainRes.intent === 'introduce') {
+    const card = findLocalSnack(prefs.product_name) || findLocalSnack(body.message);
     // 点名的货撞上忌口 / 过敏 → 卡片不给。
     // 模型这时候多半在顺着用户说，所以话也一起换成劝阻的
     const blocked = cardBlocked(card, freshMemory, traceId);
     return {
-      route: "direct",
+      route: 'direct',
       reply: blocked
-        ? `这个我得拦一下——${blocked.replace(/^用户/, "你")}，${card?.name}就不给你推了。换个别的？`
-        : guardReply(
-            brainRes.reply?.trim() || "emmm 这个我还不太了解",
-            freshMemory,
-            traceId,
-          ),
+        ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card?.name}就不给你推了。换个别的？`
+        : guardReply(brainRes.reply?.trim() || 'emmm 这个我还不太了解', freshMemory, traceId),
       profile: cleanProfile(body.message, prefs),
       ...(card && !blocked ? { recommendations: [card] } : {}),
       memory: snapshot(freshMemory),
@@ -297,9 +267,8 @@ async function handleTurn({
 
   if (!recommendations.length) {
     return {
-      route: "direct",
-      reply:
-        workflow?.follow_up || "emmm 这个条件有点刁钻，换宽松点我再给你找？",
+      route: 'direct',
+      reply: workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？',
       // 追问偏好也算推荐进行中：下一轮用户报偏好要按"回答推荐追问"处理
       awaiting_prefs: !!workflow?.follow_up,
       profile: cleanProfile(body.message, prefs),
@@ -310,8 +279,10 @@ async function handleTurn({
   // 逐款明细（名字/为什么/活动/到手价/注意事项）由本地按真实选品结果合成，
   // 大脑只负责开头那句接住人的话——让它复述商品必错：价、活动、库存都以数据为准。
   // 模型的开头也可能嘴上提忌口货（卡片是干净的），出口前再扫一遍
+  // 模型那句开头先过清洗：自己写的"1. XX｜X元"清单、以及"你先说句随便"这类
+  // 把内部逻辑漏出来的句子一律切掉；切光了才落本地过渡语池
   const transition = guardReply(
-    brainRes.reply?.trim() || pickTransition(prefs, body.filters),
+    sanitizeTransition(brainRes.reply) || pickTransition(prefs, body.filters),
     freshMemory,
     traceId,
   );
@@ -325,7 +296,7 @@ async function handleTurn({
     : transition;
 
   return {
-    route: "workflow",
+    route: 'workflow',
     reply: withPendingQuestion(reply, mem.question),
     recommendations,
     profile: cleanProfile(body.message, prefs),

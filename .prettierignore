@@ -1,0 +1,19 @@
+# 依赖与构建产物
+node_modules
+.next
+out
+
+# 运行期数据（记忆库、日志、smoke 输出）
+data
+*.log
+smoke-*.txt
+*.flag
+
+# 锁文件与自动生成文件
+package-lock.json
+next-env.d.ts
+
+# 手写中文文档：表格/编号都是人工排的，格式化只制造无意义 diff。
+# 代码（.ts/.tsx/.mjs）才走 Prettier，文档靠人眼。
+*.md
+workflow.txt

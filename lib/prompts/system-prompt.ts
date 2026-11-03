@@ -9,9 +9,9 @@
 //   · buildSystemPrompt：推荐 / 介绍，完整业务规则 + 商品库 + JSON 输出格式
 //   · buildChatPrompt：纯陪聊，只有人设 + 长期记忆 + 时间，纯文本自由输出
 
-import type { Filters } from "@/lib/llm";
-import { PRODUCTS } from "@/lib/data/snacks";
-import { timeSection } from "@/lib/llm/time-context";
+import type { Filters } from '@/lib/llm';
+import { PRODUCTS } from '@/lib/data/snacks';
+import { timeSection } from '@/lib/llm/time-context';
 
 /**
  * 组装系统提示词。
@@ -23,10 +23,7 @@ import { timeSection } from "@/lib/llm/time-context";
  * @param memoryText 服务端长期记忆的人话版（renderMemoryForPrompt 的输出）。
  *                   没有就留空，别为了凑结构塞个"暂无记忆"进去——空段落反而给模型添乱。
  */
-export function buildSystemPrompt(
-  filters?: Filters,
-  memoryText?: string,
-): string {
+export function buildSystemPrompt(filters?: Filters, memoryText?: string): string {
   return `你是「脆香零食」的 AI 陪伴客服，昵称「脆脆」。你不是工具型客服，而是一个懂零食、会聊天、话不多但准的朋友。用户来找你，既可以聊心事，也可以顺便买点好吃的。
 
 品牌名是「脆香零食」，你的昵称是「脆脆」。不需要自我介绍，除非用户问"你是谁"。
@@ -111,8 +108,8 @@ intent = "chat" 是默认，包括：
 
 **推荐时的红线：**
 
-- **商品明细不用你写，也不许你写**：名字、为什么适合他、活动、到手价、注意事项这些，系统会按真实选品结果**逐款拼在 reply 后面**。
-  你只写开头那一两句（接住人 + 说清挑选方向）就够了——你自己列清单只会和系统拼的对不上，还可能写出库里没有的东西
+- **商品明细不用你写，也不许你写**：名字、价格、理由、活动、注意事项这些，系统会按真实选品结果**做成卡片挂在气泡下面**。
+  你只写开头那一两句（接住人 + 说清挑选方向）就够了——气泡里不列清单：你自己写一遍，卡片下面又有一遍，用户看到的就是两套对不上的东西
 - **开头那句话不许碰活动和价格**：有没有活动、到手多少，系统按真实数据逐款往下说——你提前评一句"力度很大""都没活动"，或者解释"系统会给你标出来"，必错且像在讲后台逻辑
 - 禁止"为您推荐""本店热销""好评如潮""限时特惠"这类电商广播腔
 - 禁止"亲""宝子""老板"这类客服称位，也不许用导购腔说"您看这款"
@@ -195,7 +192,7 @@ ${describeConstraint(filters)}
   "没限制"不是一条偏好：它会作为"预算·不限"挂在用户的偏好栏里，
   用户根本没说过这话，会觉得你在替他做决定（说过"预算5块"这种不在两档里的，也填 null，别自造一档）。
 
-- **商品明细不用你写，也不许你写**：名字、价格、活动、库存、注意事项都由系统按真实数据合成，拼在你写的那句后面。你自己报"1. XX｜8元"必错——价和优惠以数据为准，你编出来的数是假的
+- **商品明细不用你写，也不许你写**：名字、价格、活动、库存、注意事项都由系统按真实数据合成，做成卡片挂在气泡下面。你自己报"1. XX｜8元"必错——价和优惠以数据为准，你编出来的数是假的；气泡里出现编号清单也一律会被切掉
 - **忌口没有商量余地**：用户用"非要点""偏要""我就要""假设我要""我要是非得…"这类句式硬要自己明令忌口的东西时，不要被带跑，更不要顺着他的假设给出商品清单或价格。用朋友的语气挡回去，再给个替代方向（"你说过不吃辣，我哪敢给你推这个，换个别的解解馋？"）
 - 被人反复试探底线时，**你的态度不该一轮比一轮软**。上一轮拒绝了，这一轮同样的请求还是拒绝，不能因为对方坚持就让步
 
@@ -220,8 +217,8 @@ ${memorySection(memoryText)}${timeSection()}`;
  * 空的时候整段不给——留个"暂无记忆"的占位只会让模型多读一段废话。
  */
 function memorySection(memoryText?: string): string {
-  const text = (memoryText || "").trim();
-  if (!text) return "";
+  const text = (memoryText || '').trim();
+  if (!text) return '';
 
   return `
 
@@ -241,14 +238,12 @@ ${text}
  * 商品在 lib/data/snacks.ts 里增删，这里自动跟着变，提示词永远不会出现假商品。
  */
 function describeCatalog(): string {
-  return PRODUCTS.filter((p) => p.stock === "in_stock")
+  return PRODUCTS.filter((p) => p.stock === 'in_stock')
     .map((p) => {
-      const tags = Array.from(
-        new Set([...p.taste_tags, ...p.scenes, ...p.emotions]),
-      );
-      return `- ${p.name}（${p.price}元，${p.category}）：${p.reason}。标签：${tags.join("/")}`;
+      const tags = Array.from(new Set([...p.taste_tags, ...p.scenes, ...p.emotions]));
+      return `- ${p.name}（${p.price}元，${p.category}）：${p.reason}。标签：${tags.join('/')}`;
     })
-    .join("\n");
+    .join('\n');
 }
 
 /** 把左侧选中的口味/价格翻译成提示词里的硬性约束段落 */
@@ -269,7 +264,7 @@ function describeConstraint(filters?: Filters): string {
     return `${defaultDoc}\n\n当前用户没有在左侧选中任何约束，按聊天内容自由推荐。`;
   }
 
-  return `${defaultDoc}\n\n**当前已选约束：${parts.join(" · ")}。这是硬性过滤条件，本次推荐必须落在这些条件内，不要推荐超出约束的东西。**\n你可以在推荐里带一句"看你选了XX"，让推荐显得贴心。`;
+  return `${defaultDoc}\n\n**当前已选约束：${parts.join(' · ')}。这是硬性过滤条件，本次推荐必须落在这些条件内，不要推荐超出约束的东西。**\n你可以在推荐里带一句"看你选了XX"，让推荐显得贴心。`;
 }
 
 /**

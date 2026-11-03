@@ -13,38 +13,13 @@
 //
 // 排序权重沿用工作流第五节：需求匹配 35 / 优惠 20 / 质量 15 / 转化 10 / 毛利 10 / 库存 5 / 售后 5
 
-import {
-  REFUSE_PATTERN,
-  BUY_PATTERN,
-  ADJUST_PATTERN,
-  CONSENT_PATTERN,
-  INTRODUCE_PATTERN,
-  SPICY_WANT_PATTERN,
-  PRICE_PATTERN,
-  KNOWN_SHORT,
-  MEMORY_QUERY_PATTERN,
-  MEMORY_CLEAR_PATTERN,
-  MEMORY_DELETE_PATTERN,
-  MEMORY_KEYWORD_PATTERN,
-  PENDING_YES_PATTERN,
-  PENDING_NO_PATTERN,
-  QUALIFIED_ANSWER_PATTERN,
-  LEAD_IN_REPLY_PATTERN,
-  VAGUE_EAT_PATTERN,
-  GIFT_NEED_PATTERN,
-  NIGHT_PATTERN,
-} from "@/lib/rules/patterns";
-import type { Preferences, Filters } from "@/lib/llm";
-import { PRODUCTS, type Product } from "@/lib/data/snacks";
-import {
-  pricePlan,
-  getMember,
-  describePlan,
-  type PricePlan,
-} from "@/lib/data/promos";
-import { extractCategories, CATEGORY_TRIGGERS } from "@/lib/llm/category-words";
-import { timeContext } from "@/lib/llm/time-context";
-import type { RecalledMemory } from "@/lib/memory/store";
+import { VAGUE_EAT_PATTERN } from '@/lib/rules/patterns';
+import type { Preferences, Filters } from '@/lib/llm';
+import { PRODUCTS, type Product } from '@/lib/data/snacks';
+import { pricePlan, getMember, describePlan, type PricePlan } from '@/lib/data/promos';
+import { extractCategories, CATEGORY_TRIGGERS } from '@/lib/llm/category-words';
+import { timeContext } from '@/lib/llm/time-context';
+import type { RecalledMemory } from '@/lib/memory/store';
 
 // ─── 需求（139202 的输出口径）─────────────────────────
 export interface Need {
@@ -154,9 +129,9 @@ export interface LocalWorkflowInput {
 }
 
 const BUDGET_MAP: Record<string, { min: number | null; max: number | null }> = {
-  "30元内": { min: null, max: 30 },
-  "30-60元": { min: 30, max: 60 },
-  "60元以上": { min: 60, max: null },
+  '30元内': { min: null, max: 30 },
+  '30-60元': { min: 30, max: 60 },
+  '60元以上': { min: 60, max: null },
   不限: { min: null, max: null },
 };
 
@@ -165,7 +140,7 @@ export function budgetFromText(budget?: string): {
   min: number | null;
   max: number | null;
 } {
-  return BUDGET_MAP[budget || ""] || { min: null, max: null };
+  return BUDGET_MAP[budget || ''] || { min: null, max: null };
 }
 
 /**
@@ -177,28 +152,28 @@ export function budgetFromText(budget?: string): {
  * 一条都拦不住——鱿鱼丝（allergens=['海产品']、category 是「海味零食」）也是同一个漏法。
  */
 const AVOID_TAGS: Record<string, string[]> = {
-  不吃辣: ["辣味"],
-  不想吃辣: ["辣味"],
-  不能吃辣: ["辣味"],
-  忌辣: ["辣味"],
-  不吃甜: ["甜味"],
-  不想吃甜: ["甜味"],
-  不吃酸: ["酸味"],
-  花生过敏: ["坚果", "花生"],
-  坚果过敏: ["坚果"],
-  海鲜过敏: ["海产品"],
-  海产品过敏: ["海产品"],
-  奶过敏: ["乳制品"],
-  乳制品过敏: ["乳制品"],
-  乳糖不耐: ["乳制品"],
+  不吃辣: ['辣味'],
+  不想吃辣: ['辣味'],
+  不能吃辣: ['辣味'],
+  忌辣: ['辣味'],
+  不吃甜: ['甜味'],
+  不想吃甜: ['甜味'],
+  不吃酸: ['酸味'],
+  花生过敏: ['坚果', '花生'],
+  坚果过敏: ['坚果'],
+  海鲜过敏: ['海产品'],
+  海产品过敏: ['海产品'],
+  奶过敏: ['乳制品'],
+  乳制品过敏: ['乳制品'],
+  乳糖不耐: ['乳制品'],
 };
 
 /** 场景与辣味的冲突：这些场景下没人想啃变态辣 */
-const CALM_SCENES = ["海边", "户外", "办公室", "看剧", "爬山"];
+const CALM_SCENES = ['海边', '户外', '办公室', '看剧', '爬山'];
 
 /** 一句用户原话 / 记忆文本 → 它表达的忌口标签（没有则空数组） */
 export function avoidTagsFromText(text?: string): string[] {
-  const t = (text || "").trim();
+  const t = (text || '').trim();
   if (!t) return [];
   const out = new Set<string>();
   for (const [k, tags] of Object.entries(AVOID_TAGS)) {
@@ -214,11 +189,7 @@ export function avoidTagsFromText(text?: string): string[] {
  * 不能只有主工作流记得忌口。
  */
 export function memoryAvoidTags(memory: RecalledMemory): string[] {
-  const texts = [
-    ...memory.core_profile,
-    ...memory.summary_memory,
-    ...memory.active_fragments,
-  ];
+  const texts = [...memory.core_profile, ...memory.summary_memory, ...memory.active_fragments];
   const out = new Set<string>();
   for (const t of texts) avoidTagsFromText(t).forEach((x) => out.add(x));
   return [...out];
@@ -242,13 +213,7 @@ export interface HardConstraints {
 }
 
 /** 口味强诉求白名单：只有这些才算"要什么口味"，口感词（脆/软/嚼感解压）只是软偏好 */
-export const HARD_TASTE_WORDS = new Set([
-  "辣味",
-  "甜味",
-  "咸味",
-  "酸味",
-  "清淡",
-]);
+export const HARD_TASTE_WORDS = new Set(['辣味', '甜味', '咸味', '酸味', '清淡']);
 
 /**
  * 对应 Coze 工作流节点 138157：硬过滤（单品判定）
@@ -261,54 +226,43 @@ export const HARD_TASTE_WORDS = new Set([
  *
  * @returns 出局原因；返回 `null` 表示这件商品合格
  */
-export function violateHardConstraint(
-  p: Product,
-  c: HardConstraints,
-): string | null {
-  if (c.exclude?.includes(p.name)) return "上一轮刚推过，这一轮先避开";
-  if (p.stock === "out_of_stock") return "没货了";
+export function violateHardConstraint(p: Product, c: HardConstraints): string | null {
+  if (c.exclude?.includes(p.name)) return '上一轮刚推过，这一轮先避开';
+  if (p.stock === 'out_of_stock') return '没货了';
 
   const hay = [...p.taste_tags, ...p.scenes, ...p.category, ...p.name];
-  const noSpicy = c.avoid_tags.includes("辣味");
+  const noSpicy = c.avoid_tags.includes('辣味');
 
   // 忌辣是死命令：微辣也一并避开，不能拿"就一点点辣"糊弄
-  if (noSpicy && p.spicy > (c.allow_mild_spicy ? 1 : 0)) return "用户不吃辣";
+  if (noSpicy && p.spicy > (c.allow_mild_spicy ? 1 : 0)) return '用户不吃辣';
 
   // 口味是强诉求：要什么口味，商品就得真有，否则别进候选。
   // 口感词（脆/软/嚼感解压）不算——那是软偏好，留给 rank 打分，不能硬砍。
-  const wantsTaste = (c.required_taste || []).filter((t) =>
-    HARD_TASTE_WORDS.has(t),
-  );
-  const wantsSpicy = wantsTaste.includes("辣味");
+  const wantsTaste = (c.required_taste || []).filter((t) => HARD_TASTE_WORDS.has(t));
+  const wantsSpicy = wantsTaste.includes('辣味');
 
   // 轻松场景下不推重辣——但用户**明说要辣**时，场景不能反客为主把口味强诉求压掉
   // （旧逻辑：海边+要辣，火鸡面/辣味花生被"海边场景不适合重辣"砍掉，反而推了不辣的雪饼）
   const calmScene = c.scene && CALM_SCENES.includes(c.scene);
-  if (!noSpicy && !wantsSpicy && calmScene && p.spicy >= 2)
-    return `${c.scene}场景不适合重辣`;
+  if (!noSpicy && !wantsSpicy && calmScene && p.spicy >= 2) return `${c.scene}场景不适合重辣`;
 
-  if (wantsSpicy && p.spicy === 0) return "用户要辣的，这个不辣";
+  if (wantsSpicy && p.spicy === 0) return '用户要辣的，这个不辣';
 
   // 忌口：命中标签即出局
-  const badTag = c.avoid_tags.find(
-    (t) => t !== "辣味" && hay.some((h) => h.includes(t)),
-  );
+  const badTag = c.avoid_tags.find((t) => t !== '辣味' && hay.some((h) => h.includes(t)));
   if (badTag) return `用户明确不要${badTag}`;
 
   // 过敏原：只看标签不够，allergens 字段里写明的一律挡掉
   const badAllergen = p.allergens.find((a) => c.avoid_tags.includes(a));
   if (badAllergen) return `含${badAllergen}，用户过敏`;
 
-  if (c.gift_need && !p.gift_ok) return "不适合送礼";
-  if ((c.people || []).includes("孩子") && !p.child_ok) return "不适合儿童";
+  if (c.gift_need && !p.gift_ok) return '不适合送礼';
+  if ((c.people || []).includes('孩子') && !p.child_ok) return '不适合儿童';
 
   // 其他口味（甜/咸/酸/清淡）：必须落在商品 taste_tags 里才算数
-  const otherTaste = wantsTaste.filter((t) => t !== "辣味");
-  if (
-    otherTaste.length &&
-    !otherTaste.some((t) => p.taste_tags.some((x) => x.includes(t)))
-  )
-    return `用户要${otherTaste.join("、")}的`;
+  const otherTaste = wantsTaste.filter((t) => t !== '辣味');
+  if (otherTaste.length && !otherTaste.some((t) => p.taste_tags.some((x) => x.includes(t))))
+    return `用户要${otherTaste.join('、')}的`;
 
   // 预算：工作流规则是超出 20% 才砍，略微超预算的留着当备选
   const ratio = c.over_budget_ratio ?? 0.2;
@@ -323,33 +277,33 @@ export function buildNeed(input: LocalWorkflowInput): Need {
   const { prefs, filters, memory, message } = input;
   const taste = new Set<string>();
   if (filters?.flavor) taste.add(filters.flavor);
-  if (prefs.flavor && prefs.flavor !== "null") taste.add(prefs.flavor);
-  if (prefs.texture && prefs.texture !== "null") taste.add(prefs.texture);
+  if (prefs.flavor && prefs.flavor !== 'null') taste.add(prefs.flavor);
+  if (prefs.texture && prefs.texture !== 'null') taste.add(prefs.texture);
 
-  const budget = BUDGET_MAP[filters?.budget || prefs.budget || ""] || {
+  const budget = BUDGET_MAP[filters?.budget || prefs.budget || ''] || {
     min: null,
     max: null,
   };
 
   const avoid = new Set<string>();
-  const avoidText = (prefs.avoid || "").trim();
-  if (avoidText && avoidText !== "null") {
+  const avoidText = (prefs.avoid || '').trim();
+  if (avoidText && avoidText !== 'null') {
     for (const [k, tags] of Object.entries(AVOID_TAGS)) {
       if (avoidText.includes(k)) tags.forEach((t) => avoid.add(t));
     }
-    if (/花生过敏|坚果过敏/.test(avoidText)) avoid.add("坚果");
-    if (/海鲜|海产品/.test(avoidText)) avoid.add("海产品");
-    if (/奶|乳糖/.test(avoidText)) avoid.add("乳制品");
+    if (/花生过敏|坚果过敏/.test(avoidText)) avoid.add('坚果');
+    if (/海鲜|海产品/.test(avoidText)) avoid.add('海产品');
+    if (/奶|乳糖/.test(avoidText)) avoid.add('乳制品');
   }
   memoryAvoidTags(memory).forEach((t) => avoid.add(t));
 
-  const scene = (prefs.scene || "").trim();
+  const scene = (prefs.scene || '').trim();
   const gift_need = /送礼|送人|送朋友|送客户|送同事|伴手礼/.test(message);
 
   const missing: string[] = [];
-  if (!taste.size) missing.push("口味");
-  if (!scene) missing.push("场景");
-  if (budget.max == null) missing.push("预算");
+  if (!taste.size) missing.push('口味');
+  if (!scene) missing.push('场景');
+  if (budget.max == null) missing.push('预算');
 
   // 品类必须落到 the_query 的正排里：历史上 category_preference 一直是空数组，
   // 结果"想吃坚果"捞不上坚果，被场景/情绪的软命中顶掉——这是用户看得见的硬伤
@@ -361,24 +315,17 @@ export function buildNeed(input: LocalWorkflowInput): Need {
     category_preference,
     taste_preference: [...taste],
     scene,
-    purpose: gift_need ? "送人" : "自己吃",
+    purpose: gift_need ? '送人' : '自己吃',
     package_preference: [],
-    people: gift_need ? ["朋友"] : ["自己"],
+    people: gift_need ? ['朋友'] : ['自己'],
     avoid_tags: [...avoid],
     must_have_tags: [],
-    quantity_preference: "",
+    quantity_preference: '',
     gift_need,
     missing_fields: missing,
-    raw_user_need: describeNeed(
-      message,
-      [...taste],
-      scene,
-      budget.max,
-      [...avoid],
-      gift_need,
-    ),
+    raw_user_need: describeNeed(message, [...taste], scene, budget.max, [...avoid], gift_need),
     raw_message: message,
-    emotion: (prefs.emotion || "").trim(),
+    emotion: (prefs.emotion || '').trim(),
   };
 }
 
@@ -391,13 +338,13 @@ function describeNeed(
   gift: boolean,
 ): string {
   const parts: string[] = [];
-  if (taste.length) parts.push(`想要${taste.join("、")}`);
+  if (taste.length) parts.push(`想要${taste.join('、')}`);
   if (scene) parts.push(`${scene}吃`);
   if (budgetMax != null) parts.push(`${budgetMax}元以内`);
-  if (avoid.length) parts.push(`避开${avoid.join("、")}`);
-  if (gift) parts.push("用来送人");
+  if (avoid.length) parts.push(`避开${avoid.join('、')}`);
+  if (gift) parts.push('用来送人');
   return parts.length
-    ? `用户说「${message}」，${parts.join("，")}`
+    ? `用户说「${message}」，${parts.join('，')}`
     : `用户说「${message}」，没有附加条件`;
 }
 
@@ -406,32 +353,23 @@ export function buildQuery(need: Need, exclude: string[] = []): RagQuery {
   const positive = [...need.taste_preference];
   if (need.scene) positive.push(need.scene);
   if (need.emotion) positive.push(need.emotion);
-  if (need.gift_need) positive.push("礼盒", "包装好");
-  if (need.category_preference.length)
-    positive.push(...need.category_preference);
+  if (need.gift_need) positive.push('礼盒', '包装好');
+  if (need.category_preference.length) positive.push(...need.category_preference);
 
   const negative = [...need.avoid_tags];
-  if (need.avoid_tags.includes("辣味"))
-    negative.push("中辣", "重辣", "麻辣", "香辣");
+  if (need.avoid_tags.includes('辣味')) negative.push('中辣', '重辣', '麻辣', '香辣');
 
   return {
-    rag_query: [
-      need.scene,
-      ...need.taste_preference,
-      ...need.category_preference,
-      need.purpose,
-    ]
+    rag_query: [need.scene, ...need.taste_preference, ...need.category_preference, need.purpose]
       .filter(Boolean)
-      .join(" "),
+      .join(' '),
     positive_terms: Array.from(new Set(positive)),
     negative_terms: Array.from(new Set([...negative, ...exclude])),
     retrieval_focus: need.scene ? [need.scene] : need.taste_preference,
     category_terms: need.category_preference,
     name_terms: Array.from(
       new Set([
-        ...CATEGORY_TRIGGERS.filter((w) =>
-          (need.raw_message || "").includes(w),
-        ),
+        ...CATEGORY_TRIGGERS.filter((w) => (need.raw_message || '').includes(w)),
         ...need.taste_preference,
       ]),
     ),
@@ -440,28 +378,13 @@ export function buildQuery(need: Need, exclude: string[] = []): RagQuery {
 }
 
 /** 183290：知识库检索。没有向量库，按标签命中打分取 top_k */
-export function retrieve(
-  query: RagQuery,
-  pool: Product[] = PRODUCTS,
-): Product[] {
+export function retrieve(query: RagQuery, pool: Product[] = PRODUCTS): Product[] {
   const scored = pool.map((p) => {
-    const haystack = [
-      ...p.taste_tags,
-      ...p.scenes,
-      ...p.emotions,
-      p.category,
-      p.name,
-    ];
-    const hit = query.positive_terms.filter((t) =>
-      haystack.some((h) => h.includes(t)),
-    ).length;
-    const neg = query.negative_terms.filter((t) =>
-      haystack.some((h) => h.includes(t)),
-    ).length;
+    const haystack = [...p.taste_tags, ...p.scenes, ...p.emotions, p.category, p.name];
+    const hit = query.positive_terms.filter((t) => haystack.some((h) => h.includes(t))).length;
+    const neg = query.negative_terms.filter((t) => haystack.some((h) => h.includes(t))).length;
     // 品类是硬需求（"我要坚果"），命中一次抵三次普通过词：不能被场景/情绪的软命中挤下去
-    const catHit = query.category_terms.filter((c) =>
-      p.category.includes(c),
-    ).length;
+    const catHit = query.category_terms.filter((c) => p.category.includes(c)).length;
     // 点名某个具体款（"来点薯片"）时，名字命中的必须站到最前，不能被同品类的兄弟盖掉
     const nameHit = query.name_terms.filter((t) => p.name.includes(t)).length;
     return { p, score: hit + catHit * 3 + nameHit * 5 - neg * 2 };
@@ -507,48 +430,28 @@ export function rank(
   const member = getMember(userId);
   // 时间上下文：白天推"深夜款"（商品理由里就写着"深夜也不腻"）等于当着人面念错台词
   const { isNight } = timeContext();
-  const userSaidNight = /深夜|夜宵|熬夜|通宵|睡前|加班到/.test(
-    need.raw_message || "",
-  );
+  const userSaidNight = /深夜|夜宵|熬夜|通宵|睡前|加班到/.test(need.raw_message || '');
 
   const scored = qualified.map((p) => {
-    const hay = [
-      ...p.taste_tags,
-      ...p.scenes,
-      ...p.emotions,
-      p.category,
-      p.name,
-    ];
-    const matched = query.positive_terms.filter((t) =>
-      hay.some((h) => h.includes(t)),
-    );
+    const hay = [...p.taste_tags, ...p.scenes, ...p.emotions, p.category, p.name];
+    const matched = query.positive_terms.filter((t) => hay.some((h) => h.includes(t)));
     const plan = pricePlan([{ product: p, qty: 1 }], member);
     // 点了某一类货，这类必须站前排：标签层面的软命中（"嚼感"）抢不过"我要坚果"
-    const categoryBonus = need.category_preference.some((c) =>
-      p.category.includes(c),
-    )
-      ? 25
-      : 0;
+    const categoryBonus = need.category_preference.some((c) => p.category.includes(c)) ? 25 : 0;
     // 点了名这一款（"来点薯片"），名字命中的直接顶到第一
     const nameBonus = query.name_terms.some((t) => p.name.includes(t)) ? 18 : 0;
     // 时段对得上才推：白天把"深夜"场景的款压下去（用户明说熬夜/夜宵除外），夜里反过来给点优势
-    const nightScene = p.scenes.includes("深夜");
+    const nightScene = p.scenes.includes('深夜');
     const timeBonus =
-      nightScene && !isNight && !userSaidNight
-        ? -20
-        : nightScene && isNight
-          ? 8
-          : 0;
+      nightScene && !isNight && !userSaidNight ? -20 : nightScene && isNight ? 8 : 0;
 
-    const needScore =
-      (matched.length / Math.max(1, query.positive_terms.length)) * 35;
+    const needScore = (matched.length / Math.max(1, query.positive_terms.length)) * 35;
     const promoScore = Math.min(1, plan.saved / Math.max(1, p.price)) * 20;
     const qualityScore = (p.quality / 100) * 15;
     const convertScore = (matched.length ? 8 : 4) + (p.quality >= 85 ? 2 : 0);
     const marginScore = (p.margin / 100) * 10;
-    const stockScore = p.stock === "in_stock" ? 5 : 0;
-    const riskScore =
-      p.allergens.length === 0 ? 5 : p.allergens.length === 1 ? 3 : 1;
+    const stockScore = p.stock === 'in_stock' ? 5 : 0;
+    const riskScore = p.allergens.length === 0 ? 5 : p.allergens.length === 1 ? 3 : 1;
 
     const score = Math.round(
       needScore +
@@ -613,11 +516,11 @@ export function rank(
  * 价格、省钱、过敏原这些硬信息照准，只是换个说法。
  */
 const SCENE_REASON: Record<string, string> = {
-  海边: "吹着海风吃这个刚好",
-  户外: "带出门扛饿，还不占地方",
-  看剧: "追剧的时候嘴别闲着",
-  加班: "加班垫一口正好",
-  办公室: "抽屉里备着，摸鱼来一口",
+  海边: '吹着海风吃这个刚好',
+  户外: '带出门扛饿，还不占地方',
+  看剧: '追剧的时候嘴别闲着',
+  加班: '加班垫一口正好',
+  办公室: '抽屉里备着，摸鱼来一口',
 };
 
 /**
@@ -626,25 +529,19 @@ const SCENE_REASON: Record<string, string> = {
  * 卡片上那两三行"为什么是它"。话术要像朋友在挑，不能像字段校验报告
  * （"对得上你说的XX"这种没人读）。价格、省钱、过敏原照准，只是换个说法。
  */
-function buildReasons(
-  p: Product,
-  need: Need,
-  plan: PricePlan,
-): string[] {
+function buildReasons(p: Product, need: Need, _plan: PricePlan): string[] {
+  // _plan 现在用不上：价格/省钱那几句已归卡片（气泡里不许报价，见 reply-composer），
+  // 留着这个形参是为了和 180266 节点的入参口径一致，调用方不必跟着改。
   const out: string[] = [p.reason];
 
   // 口味理由必须落到商品自己身上：要辣得真辣，要甜/咸/酸/清淡得 taste_tags 真有。
   // 否则就会出现"不辣的雪饼，理由写冲着你要的辣味挑的"这种指鹿为马。
-  const tasteWords = (need.taste_preference || []).filter((t) =>
-    HARD_TASTE_WORDS.has(t),
-  );
+  const tasteWords = (need.taste_preference || []).filter((t) => HARD_TASTE_WORDS.has(t));
   const realTaste = tasteWords.filter((t) =>
-    t === "辣味" ? p.spicy > 0 : p.taste_tags.some((x) => x.includes(t)),
+    t === '辣味' ? p.spicy > 0 : p.taste_tags.some((x) => x.includes(t)),
   );
-  const tags = realTaste.filter(
-    (t) => t !== need.scene && !need.category_preference.includes(t),
-  );
-  if (tags.length) out.push(`冲着你要的${tags.slice(0, 2).join("、")}挑的`);
+  const tags = realTaste.filter((t) => t !== need.scene && !need.category_preference.includes(t));
+  if (tags.length) out.push(`冲着你要的${tags.slice(0, 2).join('、')}挑的`);
 
   // 场景是软偏好，不强求商品带场景标签：带就写专属句；不带就诚实说"不一定是专属但吃着也爽"
   if (need.scene) {
@@ -655,7 +552,7 @@ function buildReasons(
     }
   }
   // 到手价不写在这里：推荐话术块（reply-composer）会按同一份 plan 说一遍，写两次就是复读
-  if (p.allergens.length === 0) out.push("没常见过敏原，吃着省心");
+  if (p.allergens.length === 0) out.push('没常见过敏原，吃着省心');
   return out.slice(0, 3);
 }
 
@@ -667,30 +564,22 @@ function buildReasons(
  */
 function buildRiskNotes(p: Product, need: Need, plan: PricePlan): string[] {
   const out: string[] = [];
-  if (need.budget_max != null && p.price > need.budget_max)
-    out.push(`略超预算（${p.price}元）`);
-  if (p.allergens.length) out.push(`含${p.allergens.join("、")}`);
-  if (plan.saved > 0) out.push("具体优惠以结算页显示为准");
-  if (p.spicy >= 2) out.push("辣度较高，肠胃敏感慎入");
+  if (need.budget_max != null && p.price > need.budget_max) out.push(`略超预算（${p.price}元）`);
+  if (p.allergens.length) out.push(`含${p.allergens.join('、')}`);
+  if (plan.saved > 0) out.push('具体优惠以结算页显示为准');
+  if (p.spicy >= 2) out.push('辣度较高，肠胃敏感慎入');
   return out;
 }
 
 /** 175174：合规复核。本地生成的话术不会吹牛，主要防"把忌口商品推出来"这类硬事故 */
-export function complianceCheck(
-  list: RankedProduct[],
-  need: Need,
-): RankedProduct[] {
+export function complianceCheck(list: RankedProduct[], need: Need): RankedProduct[] {
   return list.filter((item) => {
     const p = PRODUCTS.find((x) => x.sku_id === item.sku_id);
     if (!p) return false;
-    if (need.avoid_tags.includes("辣味") && p.spicy > 0) return false;
+    if (need.avoid_tags.includes('辣味') && p.spicy > 0) return false;
     for (const tag of need.avoid_tags) {
-      if (tag === "辣味") continue;
-      if (
-        [...p.taste_tags, ...p.scenes, ...p.category, p.name].some((h) =>
-          h.includes(tag),
-        )
-      )
+      if (tag === '辣味') continue;
+      if ([...p.taste_tags, ...p.scenes, ...p.category, p.name].some((h) => h.includes(tag)))
         return false;
     }
     return true;
@@ -702,9 +591,9 @@ export function complianceCheck(
  * （原 Coze 工作流的追问节点被移植时丢了"约束计数"语义，这里补回来）
  */
 const INTAKE_QUESTIONS = [
-  "先给我个方向呗——爱吃甜的还是咸的？辣的能不能来？有预算也报个数",
-  "想吃哪一口的？甜口咸口辣口都行，说个场景也行（加班垫肚子、追剧解馋、送人）",
-  "别急，先说你想吃啥味的？我按口味给你排",
+  '先给我个方向呗——爱吃甜的还是咸的？辣的能不能来？有预算也报个数',
+  '想吃哪一口的？甜口咸口辣口都行，说个场景也行（加班垫肚子、追剧解馋、送人）',
+  '别急，先说你想吃啥味的？我按口味给你排',
 ];
 
 /**
@@ -732,17 +621,14 @@ function pickIntakeQuestion(seed: string): string {
  */
 export function recommendIntake(
   need: Need,
-  input: Pick<LocalWorkflowInput, "inRecommendContext" | "message" | "statedTaste">,
+  input: Pick<LocalWorkflowInput, 'inRecommendContext' | 'message' | 'statedTaste'>,
 ): string | undefined {
   if (input.inRecommendContext) return undefined;
 
-  if (need.gift_need && !need.people.some((x) => x !== "自己"))
-    return "这份是送谁呀？我按对象挑包装";
-  if (
-    need.people.some((x) => /孩子|孕妇|老人/.test(x)) &&
-    !need.avoid_tags.length
-  ) {
-    return "给孩子吃的话，有没有要避开的（辣、坚果、海鲜）？";
+  if (need.gift_need && !need.people.some((x) => x !== '自己'))
+    return '这份是送谁呀？我按对象挑包装';
+  if (need.people.some((x) => /孩子|孕妇|老人/.test(x)) && !need.avoid_tags.length) {
+    return '给孩子吃的话，有没有要避开的（辣、坚果、海鲜）？';
   }
 
   // 口味/口感要能在用户原话里找到对应字眼才算数——
@@ -752,7 +638,7 @@ export function recommendIntake(
 
   // 模糊请求下，旧场景不算数：必须本轮自己提到（"看海配点零食"才是有效场景约束），
   // 否则几轮前聊过"上班"，这轮一句"想吃点啥"就会被当成"信息够了"直接推
-  const vague = VAGUE_EAT_PATTERN.test(input.message || "");
+  const vague = VAGUE_EAT_PATTERN.test(input.message || '');
   const sceneCounts = vague ? statedInMessage([need.scene]) : !!need.scene;
 
   // 口味/口感**不算**"本轮才说出口"的东西：它是长期偏好——"我爱吃甜的"记进
@@ -776,15 +662,13 @@ export function recommendIntake(
     tasteCounts,
     sceneCounts,
     // '自己吃' 是 buildNeed 的默认值，不是用户说出来的约束，不能计数
-    !!need.purpose && need.purpose !== "自己吃",
+    !!need.purpose && need.purpose !== '自己吃',
     need.package_preference.length > 0,
     need.avoid_tags.length > 0,
-    need.people.some((x) => x !== "自己"),
+    need.people.some((x) => x !== '自己'),
   ].some(Boolean);
 
-  return hasConstraint
-    ? undefined
-    : pickIntakeQuestion(input.message || "推荐");
+  return hasConstraint ? undefined : pickIntakeQuestion(input.message || '推荐');
 }
 
 /**
@@ -794,13 +678,11 @@ export function recommendIntake(
 export function needFollowUp(qualifiedCount: number): string | undefined {
   // 有货就出卡片，别为凑 3 张硬推不想要的；一款都没有才追问
   if (qualifiedCount >= 1) return undefined;
-  return "这个条件有点刁钻，换个口味或放宽点预算我再找？";
+  return '这个条件有点刁钻，换个口味或放宽点预算我再找？';
 }
 
 /** 整条链路：需求 → 检索 → 硬过滤 → 排序 → 合规 */
-export function runLocalWorkflow(
-  input: LocalWorkflowInput,
-): LocalWorkflowResult {
+export function runLocalWorkflow(input: LocalWorkflowInput): LocalWorkflowResult {
   const exclude = input.exclude || [];
   const need = buildNeed(input);
   const query = buildQuery(need, exclude);
@@ -828,29 +710,23 @@ export function runLocalWorkflow(
   // 于是"不吃辣 + 10元内"只剩一两款，放宽了个寂寞（以前 `retrieve(query, PRODUCTS)` 就是这么写的）。
   // 放宽时改成全库直接过硬约束：忌口 / 预算 / 库存一条不放，
   // 贴不贴合交给 rank 的评分去体现（命中 query 的自然排在前面），总比只给一张卡强。
-  let finalQualified = qualified;
+  const finalQualified = qualified;
   let allFiltered = filtered_out;
   if (qualified.length < 3) {
     const wider = hardFilter(PRODUCTS, need, []);
     for (const p of wider.qualified) {
-      if (!finalQualified.some((x) => x.sku_id === p.sku_id))
-        finalQualified.push(p);
+      if (!finalQualified.some((x) => x.sku_id === p.sku_id)) finalQualified.push(p);
     }
     allFiltered = wider.filtered_out;
   }
 
-  const ranked = complianceCheck(
-    rank(finalQualified, need, query, input.userId),
-    need,
-  );
+  const ranked = complianceCheck(rank(finalQualified, need, query, input.userId), need);
 
   // 候选不足 3 款、且用户点名了口味（被口味卡得严）→ 气泡诚实说一声，别假装很丰富
-  const hasTasteWant = (need.taste_preference || []).some((t) =>
-    HARD_TASTE_WORDS.has(t),
-  );
+  const hasTasteWant = (need.taste_preference || []).some((t) => HARD_TASTE_WORDS.has(t));
   const shortfall_note =
     ranked.length > 0 && ranked.length < 3 && hasTasteWant
-      ? `符合要求的就这几款${need.scene ? `，${need.scene}带辣的确实不多` : ""}，我先按最对味的来，要不要看看别的？`
+      ? `符合要求的就这几款${need.scene ? `，${need.scene}带辣的确实不多` : ''}，我先按最对味的来，要不要看看别的？`
       : undefined;
 
   return {

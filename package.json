@@ -8,8 +8,13 @@
     "dev:log": "next dev > dev.out.log 2> dev.err.log",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "verify": "tsc --noEmit && vitest run",
     "guard": "node --import ./scripts/ts-alias-register.mjs scripts/profile-guard.ts && node --import ./scripts/ts-alias-register.mjs scripts/reco-guard.ts",
     "smoke": "node scripts/smoke.mjs",
     "capture-log": "node scripts/capture-log.mjs",
@@ -22,12 +27,19 @@
     "react-dom": "19.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/node": "22.10.7",
     "@types/react": "19.0.7",
     "@types/react-dom": "19.0.3",
     "autoprefixer": "10.4.20",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^9.1.2",
+    "globals": "^15.15.0",
     "postcss": "8.5.1",
+    "prettier": "^3.9.10",
     "tailwindcss": "3.4.17",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^3.2.7"
   }
 }

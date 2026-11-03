@@ -1,13 +1,9 @@
 // lib/llm/orchestrator.ts
 // 工作流编排：Coze（主，同步）/ Dify（备，触发 + 轮询）/ local（内置零食库，用于无 Key 时跑通链路）
 
-import { PRODUCTS, type Product } from "@/lib/data/snacks";
+import { PRODUCTS, type Product } from '@/lib/data/snacks';
 // 兜底走的硬约束判定与主链路同源，避免两条路推出不一样的货
-import {
-  avoidTagsFromText,
-  budgetFromText,
-  violateHardConstraint,
-} from "@/lib/llm/local-workflow";
+import { avoidTagsFromText, budgetFromText, violateHardConstraint } from '@/lib/llm/local-workflow';
 
 export interface WorkflowInput {
   keyword: string;
@@ -26,7 +22,7 @@ export interface Recommendation {
 }
 
 export function currentProvider(): string {
-  return process.env.ORCHESTRATOR || "local";
+  return process.env.ORCHESTRATOR || 'local';
 }
 
 /**
@@ -35,16 +31,14 @@ export function currentProvider(): string {
  * local：查内置零食库（无需任何 Key，用于开发/演示）。
  * Dify：异步模型，请改用 triggerDify() + pollWorkflow()。
  */
-export async function triggerWorkflow(
-  input: WorkflowInput,
-): Promise<Recommendation[]> {
+export async function triggerWorkflow(input: WorkflowInput): Promise<Recommendation[]> {
   const provider = currentProvider();
 
-  if (provider === "coze") return callCoze(input);
-  if (provider === "local") return matchLocalFallback(input);
-  if (provider === "dify") {
+  if (provider === 'coze') return callCoze(input);
+  if (provider === 'local') return matchLocalFallback(input);
+  if (provider === 'dify') {
     throw new Error(
-      "Dify 是异步模式，请改用 triggerDify() + pollWorkflow()，或把 ORCHESTRATOR 设为 coze / local",
+      'Dify 是异步模式，请改用 triggerDify() + pollWorkflow()，或把 ORCHESTRATOR 设为 coze / local',
     );
   }
   throw new Error(`未知编排引擎：${provider}（可选：coze / dify / local）`);
@@ -57,14 +51,14 @@ async function callCoze(input: WorkflowInput): Promise<Recommendation[]> {
 
   if (!apiKey || !workflowId) {
     throw new Error(
-      "COZE_API_KEY 或 COZE_WORKFLOW_ID 未配置（想不配就跑通，可设 ORCHESTRATOR=local）",
+      'COZE_API_KEY 或 COZE_WORKFLOW_ID 未配置（想不配就跑通，可设 ORCHESTRATOR=local）',
     );
   }
 
-  const res = await fetch("https://api.coze.cn/v3/workflow/run", {
-    method: "POST",
+  const res = await fetch('https://api.coze.cn/v3/workflow/run', {
+    method: 'POST',
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
@@ -87,16 +81,15 @@ async function callCoze(input: WorkflowInput): Promise<Recommendation[]> {
   try {
     data = await res.json();
   } catch {
-    throw new Error("Coze 返回了非法格式（不是 JSON）");
+    throw new Error('Coze 返回了非法格式（不是 JSON）');
   }
 
   if (data.code !== 0) {
-    throw new Error(`Coze 工作流调用失败：${data.msg || "未知错误"}`);
+    throw new Error(`Coze 工作流调用失败：${data.msg || '未知错误'}`);
   }
 
   // Coze 返回的 data 有时是字符串，有时已是对象，两种都要吃下
-  const parsed =
-    typeof data.data === "string" ? safeParse(data.data) : data.data;
+  const parsed = typeof data.data === 'string' ? safeParse(data.data) : data.data;
 
   return normalizeList(parsed?.recommendations);
 }
@@ -105,16 +98,16 @@ async function callCoze(input: WorkflowInput): Promise<Recommendation[]> {
 /** 触发 Dify 工作流，返回执行 ID（不是推荐结果） */
 export async function triggerDify(input: WorkflowInput): Promise<string> {
   const apiKey = process.env.DIFY_API_KEY;
-  const baseUrl = process.env.DIFY_BASE_URL || "http://localhost:3000/v1";
+  const baseUrl = process.env.DIFY_BASE_URL || 'http://localhost:3000/v1';
 
   if (!apiKey) {
-    throw new Error("DIFY_API_KEY 未配置");
+    throw new Error('DIFY_API_KEY 未配置');
   }
 
   const res = await fetch(`${baseUrl}/workflows/run`, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
@@ -124,7 +117,7 @@ export async function triggerDify(input: WorkflowInput): Promise<string> {
         ...input.user_profile,
       },
       user: input.user_id,
-      response_mode: "blocking",
+      response_mode: 'blocking',
     }),
   });
 
@@ -137,10 +130,10 @@ export async function triggerDify(input: WorkflowInput): Promise<string> {
   try {
     data = await res.json();
   } catch {
-    throw new Error("Dify 返回了非法格式（不是 JSON）");
+    throw new Error('Dify 返回了非法格式（不是 JSON）');
   }
   const execId = data?.data?.id || data?.id;
-  if (!execId) throw new Error("Dify 未返回执行 ID");
+  if (!execId) throw new Error('Dify 未返回执行 ID');
   return execId;
 }
 
@@ -150,7 +143,7 @@ export async function pollWorkflow(
   timeoutMs: number = 15000,
 ): Promise<Recommendation[]> {
   const apiKey = process.env.DIFY_API_KEY;
-  const baseUrl = process.env.DIFY_BASE_URL || "http://localhost:3000/v1";
+  const baseUrl = process.env.DIFY_BASE_URL || 'http://localhost:3000/v1';
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
@@ -167,17 +160,17 @@ export async function pollWorkflow(
       continue;
     }
 
-    if (data?.data?.status === "succeeded") {
+    if (data?.data?.status === 'succeeded') {
       return normalizeList(data.data.outputs?.recommendations);
     }
-    if (data?.data?.status === "failed") {
-      throw new Error("Dify 工作流执行失败");
+    if (data?.data?.status === 'failed') {
+      throw new Error('Dify 工作流执行失败');
     }
 
     await new Promise((r) => setTimeout(r, 1000));
   }
 
-  throw new Error("Dify 工作流超时");
+  throw new Error('Dify 工作流超时');
 }
 
 // ─── local：内置零食库（无 Key 也能跑通全链路）────────────
@@ -209,20 +202,16 @@ const SNACKS: Product[] = PRODUCTS;
 export function matchLocalFallback(
   input: WorkflowInput & { avoidTags?: string[] },
 ): Recommendation[] {
-  const kw = (input.keyword || "").trim();
+  const kw = (input.keyword || '').trim();
   const p = input.user_profile || {};
-  const prefs = [p.flavor, p.texture, p.emotion, p.scene, kw].filter(
-    Boolean,
-  ) as string[];
+  const prefs = [p.flavor, p.texture, p.emotion, p.scene, kw].filter(Boolean) as string[];
 
   const budget = budgetFromText(p.budget);
   const constraints = {
-    avoid_tags: Array.from(
-      new Set([...avoidTagsFromText(p.avoid), ...(input.avoidTags || [])]),
-    ),
+    avoid_tags: Array.from(new Set([...avoidTagsFromText(p.avoid), ...(input.avoidTags || [])])),
     budget_min: budget.min,
     budget_max: budget.max,
-    scene: (p.scene || "").trim(),
+    scene: (p.scene || '').trim(),
     exclude: (input.exclude || []).filter(Boolean),
   };
 
@@ -233,7 +222,7 @@ export function matchLocalFallback(
     score:
       prefs.reduce((n, pref) => n + (s.tags.includes(pref) ? 1 : 0), 0) +
       // 忌辣时完全不辣的排前面，跟主链路 rank() 的倾向保持一致
-      (constraints.avoid_tags.includes("辣味") && s.spicy === 0 ? 2 : 0),
+      (constraints.avoid_tags.includes('辣味') && s.spicy === 0 ? 2 : 0),
   }));
 
   // 一个都没命中就退回池子里前 3 款，但**不绕过硬约束**——宁可少给，不能给错
@@ -251,7 +240,7 @@ export function matchLocalFallback(
   }));
 }
 export function findLocalSnack(name?: string | null): Recommendation | null {
-  const kw = (name || "").trim();
+  const kw = (name || '').trim();
   if (!kw) return null;
 
   const hit =
@@ -294,7 +283,7 @@ export function blockedProductNames(avoidTags: string[]): string[] {
 }
 
 export function findLocalProduct(name?: string | null): Product | null {
-  const kw = (name || "").trim();
+  const kw = (name || '').trim();
   if (!kw) return null;
   return (
     SNACKS.find((s) => s.name === kw) ||
@@ -316,13 +305,13 @@ function safeParse(text: string): any {
 function normalizeList(raw: any): Recommendation[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((it) => it && typeof it.name === "string")
+    .filter((it) => it && typeof it.name === 'string')
     .slice(0, 3)
     .map((it) => ({
       name: String(it.name),
-      reason: typeof it.reason === "string" ? it.reason : "",
+      reason: typeof it.reason === 'string' ? it.reason : '',
       price: Number(it.price) || 0,
-      image: typeof it.image === "string" ? it.image : undefined,
-      emoji: typeof it.emoji === "string" ? it.emoji : undefined,
+      image: typeof it.image === 'string' ? it.image : undefined,
+      emoji: typeof it.emoji === 'string' ? it.emoji : undefined,
     }));
 }

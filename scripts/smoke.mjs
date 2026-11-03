@@ -3,16 +3,28 @@
  * 用法：先起 dev server（npm run dev），再 npm run smoke
  * 原则：只断言确定性行为（本地规则兜底的部分），模型随机性不做强断言。
  */
-import fs from "node:fs";
-import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const BASE = process.env.SMOKE_URL || "http://localhost:3000/api/ai";
+const BASE = process.env.SMOKE_URL || 'http://localhost:3000/api/ai';
 /** 项目根：拉起子进程跑 .ts 守卫脚本时要用它当 cwd（store.ts 按 cwd 找 data/memory.json） */
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SPICY = ["辣味海苔脆", "海苔香脆混合包", "黑胡椒薯角", "麻辣小薯角", "椒盐腰果", "香辣牛肉粒", "藤椒凤爪", "玉米脆条烧烤味", "香辣海苔天妇罗", "辣条大礼包", "麻辣魔芋爽"];
-const MEMORY_FILE = path.join(process.cwd(), "data", "memory.json");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SPICY = [
+  '辣味海苔脆',
+  '海苔香脆混合包',
+  '黑胡椒薯角',
+  '麻辣小薯角',
+  '椒盐腰果',
+  '香辣牛肉粒',
+  '藤椒凤爪',
+  '玉米脆条烧烤味',
+  '香辣海苔天妇罗',
+  '辣条大礼包',
+  '麻辣魔芋爽',
+];
+const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
 
 /**
  * 本轮用例造出来的测试用户。
@@ -27,7 +39,7 @@ const testUsers = [];
  */
 function pruneUsers(names) {
   try {
-    const store = JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8"));
+    const store = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
     let removed = 0;
     for (const uid of names) {
       if (store[uid]) {
@@ -37,7 +49,7 @@ function pruneUsers(names) {
     }
     if (removed) {
       const tmp = `${MEMORY_FILE}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
+      fs.writeFileSync(tmp, JSON.stringify(store, null, 2), 'utf8');
       fs.renameSync(tmp, MEMORY_FILE);
     }
     // 没落过记忆的用户（比如只问了"你记得我什么"的隔离用例）本来就不在文件里，
@@ -50,12 +62,10 @@ function pruneUsers(names) {
 }
 
 // 单独跑: node scripts/smoke.mjs --only-prune —— 只清历史残留，不跑用例
-if (process.argv.includes("--only-prune")) {
-  const store = JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8"));
-  const stale = Object.keys(store).filter((k) => k.startsWith("smoke_"));
-  console.log(
-    `历史 smoke 残留 ${stale.length} 个，清掉 ${pruneUsers(stale).removed} 个`,
-  );
+if (process.argv.includes('--only-prune')) {
+  const store = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
+  const stale = Object.keys(store).filter((k) => k.startsWith('smoke_'));
+  console.log(`历史 smoke 残留 ${stale.length} 个，清掉 ${pruneUsers(stale).removed} 个`);
   process.exit(0);
 }
 
@@ -71,8 +81,8 @@ async function ask(
   } = {},
 ) {
   const res = await fetch(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message,
       history,
@@ -101,7 +111,7 @@ async function ask(
  * 表现出来是"用例没跑完"而不是"某条失败"，排查方向全错。解析不了的帧丢掉即可。
  */
 const sseEvents = (text) =>
-  [...String(text || "").matchAll(/^data:\s*(.+)$/gm)]
+  [...String(text || '').matchAll(/^data:\s*(.+)$/gm)]
     .map((m) => {
       try {
         return JSON.parse(m[1]);
@@ -112,16 +122,12 @@ const sseEvents = (text) =>
     .filter(Boolean);
 
 const names = (r) =>
-  Array.isArray(r.data.recommendations)
-    ? r.data.recommendations.map((x) => x.name)
-    : [];
+  Array.isArray(r.data.recommendations) ? r.data.recommendations.map((x) => x.name) : [];
 
 const results = [];
-function expect(name, ok, detail = "") {
+function expect(name, ok, detail = '') {
   results.push(ok);
-  console.log(
-    `${ok ? "PASS" : "FAIL"}  ${name}${detail ? " — " + detail : ""}`,
-  );
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`);
 }
 
 // ── 会话状态 ──────────────────────────────────────
@@ -143,8 +149,8 @@ async function turn(text, opts = {}) {
     userProfile: profile,
     userId: mainUid,
   });
-  h.push({ role: "user", content: text });
-  if (r.data.reply) h.push({ role: "assistant", content: r.data.reply });
+  h.push({ role: 'user', content: text });
+  if (r.data.reply) h.push({ role: 'assistant', content: r.data.reply });
   if (names(r).length) {
     lastPicks = names(r);
     ctx = true;
@@ -152,42 +158,36 @@ async function turn(text, opts = {}) {
     // 追问偏好（awaiting_prefs）也算推荐上下文：用户答完偏好，下一轮就该出卡片
     ctx = r.data.awaiting_prefs === true;
   }
-  if (r.data.profile && typeof r.data.profile === "object") {
+  if (r.data.profile && typeof r.data.profile === 'object') {
     for (const [k, v] of Object.entries(r.data.profile)) {
-      if (typeof v === "string" && v.trim()) profile[k] = v.trim();
+      if (typeof v === 'string' && v.trim()) profile[k] = v.trim();
     }
   }
   return r;
 }
 
 // ── 预热：dev 模式首次请求含路由编译，先烧掉再计时 ──
-await ask("预热一下");
+await ask('预热一下');
 
 // ── 1. 乱码不硬编（本地兜底，秒回）────────────────
 {
   const t = Date.now();
-  const r = await ask("djfkl");
+  const r = await ask('djfkl');
   const instant = Date.now() - t < 800; // 本地兜底不该超过一秒
-  expect(
-    "乱码输入 → 本地兜底秒回",
-    r.status === 200 && !!r.data.reply?.trim() && instant,
-  );
+  expect('乱码输入 → 本地兜底秒回', r.status === 200 && !!r.data.reply?.trim() && instant);
 }
 
 // ── 2. 陪聊不出卡片 ──────────────────────────────
 {
-  const r = await turn("今天被领导当众骂了，烦死");
+  const r = await turn('今天被领导当众骂了，烦死');
   expect(
-    "吐槽 → 陪聊无卡片",
-    r.data.route === "direct" && !names(r).length && !!r.data.reply?.trim(),
+    '吐槽 → 陪聊无卡片',
+    r.data.route === 'direct' && !names(r).length && !!r.data.reply?.trim(),
   );
 }
 {
-  const r = await turn("当着全组人面，说我报告写得烂");
-  expect(
-    "继续吐槽 → 陪聊无卡片",
-    r.data.route === "direct" && !names(r).length,
-  );
+  const r = await turn('当着全组人面，说我报告写得烂');
+  expect('继续吐槽 → 陪聊无卡片', r.data.route === 'direct' && !names(r).length);
 }
 
 // ── 2.5 没开口要零食 → 降级陪聊：有正经正文、绝不出卡片 ──
@@ -197,27 +197,24 @@ await ask("预热一下");
 {
   const uid = `smoke_chat_${Date.now()}`;
   testUsers.push(uid);
-  const r = await ask("上班好无聊啊", { userId: uid });
-  const txt = (r.data.reply || "").trim();
+  const r = await ask('上班好无聊啊', { userId: uid });
+  const txt = (r.data.reply || '').trim();
   expect(
-    "随口一句 → 降级陪聊无卡片且有正文（不许甩「嗯？」）",
-    r.data.route === "direct" &&
-      !names(r).length &&
-      txt.length > 6 &&
-      txt !== "嗯？",
+    '随口一句 → 降级陪聊无卡片且有正文（不许甩「嗯？」）',
+    r.data.route === 'direct' && !names(r).length && txt.length > 6 && txt !== '嗯？',
     txt,
   );
 
   // 铺垫闭环：钩子抛出去之后，用户顺着答偏好，必须能接上推荐（别把人晾在陪聊里）
-  const r2 = await ask("要点辣的", {
+  const r2 = await ask('要点辣的', {
     userId: uid,
     inRecommendContext: true,
-    history: [{ role: "assistant", content: txt }],
+    history: [{ role: 'assistant', content: txt }],
   });
   expect(
-    "铺垫后顺着答偏好 → 接上推荐（出卡片或继续追问）",
+    '铺垫后顺着答偏好 → 接上推荐（出卡片或继续追问）',
     names(r2).length > 0 || r2.data.awaiting_prefs === true,
-    `${names(r2).join("/")} | ${r2.data.reply}`,
+    `${names(r2).join('/')} | ${r2.data.reply}`,
   );
 }
 
@@ -227,17 +224,17 @@ await ask("预热一下");
 {
   const uid = `smoke_chatonly_${Date.now()}`;
   testUsers.push(uid);
-  const r = await ask("今天跟朋友吵了一架，气得我晚饭都没吃", {
+  const r = await ask('今天跟朋友吵了一架，气得我晚饭都没吃', {
     userId: uid,
   });
-  const txt = (r.data.reply || "").trim();
+  const txt = (r.data.reply || '').trim();
   expect(
-    "纯陪聊链路 → 不带 JSON 痕迹（不是 json_object 的产物）",
+    '纯陪聊链路 → 不带 JSON 痕迹（不是 json_object 的产物）',
     !!txt && !/\{|"intent"|"reply"/.test(txt),
     txt,
   );
   expect(
-    "纯陪聊链路 → 不报价、不列带价清单",
+    '纯陪聊链路 → 不报价、不列带价清单',
     !!txt && !/\d+(\.\d+)?\s*(元|块)/.test(txt) && !/^\s*\d+[.、]/m.test(txt),
     txt,
   );
@@ -247,39 +244,40 @@ await ask("预热一下");
 {
   const uid = `smoke_cat_${Date.now()}`;
   testUsers.push(uid);
-  const r = await ask("想吃坚果了", { userId: uid });
-  const nuts = (r.data.recommendations || []).filter(
-    (x) => x.category === "坚果炒货",
-  );
+  const r = await ask('想吃坚果了', { userId: uid });
+  const nuts = (r.data.recommendations || []).filter((x) => x.category === '坚果炒货');
   expect(
-    "点名要坚果 → 主推就是坚果类（历史上会被场景/情绪命中顶掉）",
+    '点名要坚果 → 主推就是坚果类（历史上会被场景/情绪命中顶掉）',
     names(r).length === 3 && nuts.length >= 2,
-    names(r).join("/"),
+    names(r).join('/'),
   );
+  // 2026-11-03 起明细只在卡片里（recommendations），气泡不再逐款列清单：
+  // 以前这条断言"正文里写出三款商品名"，正好把"气泡列明细"钉死成了预期行为
   expect(
-    "推荐话术逐款点名：正文里写出三款商品名",
+    '明细归卡片：气泡里不列逐款清单，三款都在卡片上',
     names(r).length === 3 &&
-      names(r).every((n) => (r.data.reply || "").includes(n)),
-    r.data.reply,
+      !/^\s*\d+\s*[.、]/m.test(r.data.reply || '') &&
+      !/\d+(\.\d+)?\s*元/.test(r.data.reply || ''),
+    `${names(r).join('/')} | ${r.data.reply}`,
   );
 }
 {
   const uid = `smoke_name_${Date.now()}`;
   testUsers.push(uid);
-  const r = await ask("来点麻辣魔芋爽", { userId: uid });
+  const r = await ask('来点麻辣魔芋爽', { userId: uid });
   expect(
-    "点名单品 → 它就是第一张卡",
-    names(r)[0]?.includes("麻辣魔芋爽") ?? false,
-    names(r).join("/"),
+    '点名单品 → 它就是第一张卡',
+    names(r)[0]?.includes('麻辣魔芋爽') ?? false,
+    names(r).join('/'),
   );
 }
 {
   const uid = `smoke_promo_${Date.now()}`;
   testUsers.push(uid);
-  const r = await ask("坚果最近有优惠吗", { userId: uid });
+  const r = await ask('坚果最近有优惠吗', { userId: uid });
   expect(
-    "问了优惠 → 话术里要提到活动/到手价",
-    /优惠|活动|到手|省\d/.test(r.data.reply || ""),
+    '问了优惠 → 话术里要提到活动/到手价',
+    /优惠|活动|到手|省\d/.test(r.data.reply || ''),
     r.data.reply,
   );
 }
@@ -292,15 +290,15 @@ await ask("预热一下");
   testUsers.push(uid);
   const h = [
     {
-      role: "assistant",
-      content: "上班呢？坐着熬是真磨人。要不要我给你配点能嚼着的？",
+      role: 'assistant',
+      content: '上班呢？坐着熬是真磨人。要不要我给你配点能嚼着的？',
     },
   ];
-  const r = await ask("想吃点啥", { userId: uid, history: h });
+  const r = await ask('想吃点啥', { userId: uid, history: h });
   expect(
-    "模糊请求（没有口味/品类/预算）→ 先追问口味，不出卡片",
+    '模糊请求（没有口味/品类/预算）→ 先追问口味，不出卡片',
     names(r).length === 0 && r.data.awaiting_prefs === true,
-    `${names(r).join("/")} | ${r.data.reply}`,
+    `${names(r).join('/')} | ${r.data.reply}`,
   );
 }
 
@@ -312,15 +310,15 @@ await ask("预热一下");
   testUsers.push(uid);
   const h = [
     {
-      role: "assistant",
-      content: "上班呢？坐着熬是真磨人。要不要我给你配点能嚼着的？",
+      role: 'assistant',
+      content: '上班呢？坐着熬是真磨人。要不要我给你配点能嚼着的？',
     },
   ];
-  const r = await ask("想吃点啥，辣的", { userId: uid, history: h });
+  const r = await ask('想吃点啥，辣的', { userId: uid, history: h });
   expect(
-    "模糊请求但本轮说了口味 → 不追问，直接出卡片",
+    '模糊请求但本轮说了口味 → 不追问，直接出卡片',
     names(r).length > 0 && r.data.awaiting_prefs !== true,
-    `${names(r).join("/")} | ${r.data.reply}`,
+    `${names(r).join('/')} | ${r.data.reply}`,
   );
 }
 
@@ -333,10 +331,10 @@ await ask("预热一下");
   if (hour >= 5 && hour < 23) {
     const uid = `smoke_time_${Date.now()}`;
     testUsers.push(uid);
-    const r = await ask("来点清淡的，加班垫肚子", { userId: uid });
+    const r = await ask('来点清淡的，加班垫肚子', { userId: uid });
     expect(
       '白天推荐 → 话术里不提"深夜/熬夜/通宵"',
-      !/深夜|熬夜|通宵/.test(r.data.reply || ""),
+      !/深夜|熬夜|通宵/.test(r.data.reply || ''),
       r.data.reply,
     );
   }
@@ -344,71 +342,58 @@ await ask("预热一下");
 
 // ── 3. 裸要 → 先追问偏好，答完才出卡片（167988 信息完整判断）──
 {
-  const r = await turn("算了不想说了，推荐个零食吧");
+  const r = await turn('算了不想说了，推荐个零食吧');
   // "算了"不能被拒绝模式误伤；信息不足先问方向，不甩卡片
   expect(
-    "裸要 → 先追问偏好不出卡片",
-    !names(r).length &&
-      !!r.data.reply?.includes("？") &&
-      r.data.awaiting_prefs === true,
+    '裸要 → 先追问偏好不出卡片',
+    !names(r).length && !!r.data.reply?.includes('？') && r.data.awaiting_prefs === true,
     r.data.reply,
   );
 
   // 答完偏好 → 出 3 张卡片，忌口约束同步生效
-  const r2 = await turn("不辣的就行，别的随意");
+  const r2 = await turn('不辣的就行，别的随意');
   expect(
-    "答完偏好 → 出 3 卡片且无辣味",
+    '答完偏好 → 出 3 卡片且无辣味',
     names(r2).length === 3 && !names(r2).some((n) => SPICY.includes(n)),
-    names(r2).join("/"),
+    names(r2).join('/'),
   );
   const firstPicks = names(r2);
 
   // ── 4. 换一批 → 确实换 ─────────────────────────
-  const r3 = await turn("太贵了，换一个");
+  const r3 = await turn('太贵了，换一个');
   const swapped = names(r3);
   expect(
-    "换一个 → 换掉上一批",
+    '换一个 → 换掉上一批',
     swapped.length === 3 && swapped.every((n) => !firstPicks.includes(n)),
-    swapped.join("/"),
+    swapped.join('/'),
   );
 }
 
 // ── 5. 忌口三连（历史上翻过车的所有说法）──────────
 {
-  const r = await turn("我不想吃辣，来点吃的");
+  const r = await turn('我不想吃辣，来点吃的');
   const bad = names(r).filter((n) => SPICY.includes(n));
-  expect(
-    "我不想吃辣 → 无辣味",
-    names(r).length === 3 && !bad.length,
-    names(r).join("/"),
-  );
+  expect('我不想吃辣 → 无辣味', names(r).length === 3 && !bad.length, names(r).join('/'));
 }
 {
-  const r = await turn("再来一轮，不要辣的");
+  const r = await turn('再来一轮，不要辣的');
   const bad = names(r).filter((n) => SPICY.includes(n));
-  expect(
-    "不要辣的 → 无辣味",
-    names(r).length === 3 && !bad.length,
-    names(r).join("/"),
-  );
+  expect('不要辣的 → 无辣味', names(r).length === 3 && !bad.length, names(r).join('/'));
 }
 {
-  const r = await turn("还是不想吃辣");
+  const r = await turn('还是不想吃辣');
   const bad = names(r).filter((n) => SPICY.includes(n));
   expect(
-    "还是不想吃辣 → 无辣味（忌口优先于口味抽取）",
+    '还是不想吃辣 → 无辣味（忌口优先于口味抽取）',
     names(r).length === 3 && !bad.length,
-    names(r).join("/"),
+    names(r).join('/'),
   );
 }
 
 // ── 6. 拒绝 → 不追加卡片 ─────────────────────────
 {
-  const r = await turn("不想吃东西了");
-  expect(
-    "不想吃东西了 → 陪聊无卡片",
-    !names(r).length && !!r.data.reply?.trim(),
-  );
+  const r = await turn('不想吃东西了');
+  expect('不想吃东西了 → 陪聊无卡片', !names(r).length && !!r.data.reply?.trim());
 }
 
 // ── 7. 问单品 → 介绍 + 卡片 ──────────────────────
@@ -416,98 +401,98 @@ await ask("预热一下");
 // 而忌口是死命令——那个人再来问麻辣魔芋爽（辣），本来就不该给卡片。
 // 这条要验的是"问单品能配上卡片"，别让忌口把它搅了；忌口那条由第 25 节专门守。
 {
-  const uid = "smoke_intro_" + Date.now();
+  const uid = 'smoke_intro_' + Date.now();
   testUsers.push(uid);
-  const r = await ask("麻辣魔芋爽啥样", { userId: uid });
+  const r = await ask('麻辣魔芋爽啥样', { userId: uid });
   expect(
-    "麻辣魔芋爽啥样 → 介绍麻辣魔芋爽",
-    names(r).some((n) => n.includes("麻辣魔芋爽")),
-    names(r).join("/"),
+    '麻辣魔芋爽啥样 → 介绍麻辣魔芋爽',
+    names(r).some((n) => n.includes('麻辣魔芋爽')),
+    names(r).join('/'),
   );
 }
 
 // ── 8. 场景化：办公室不该推重辣夜宵款 ──────────────
 {
-  const r = await turn("明天去办公室加班，带点吃的");
+  const r = await turn('明天去办公室加班，带点吃的');
   const picked = names(r);
   const bad = picked.filter((n) => SPICY.includes(n));
   expect(
-    "去办公室 → 出卡片且贴合场景（无辣味）",
+    '去办公室 → 出卡片且贴合场景（无辣味）',
     picked.length > 0 && !bad.length,
-    picked.join("/"),
+    picked.join('/'),
   );
 }
 
 // ── 9. 辣度分级：不吃辣时不能出现中辣 / 重辣 ──────
 {
   const HEAVY = [
-    "辣味海苔脆",
-    "海苔香脆混合包",
-    "黑胡椒薯角",
-    "麻辣小薯角",
-    "椒盐腰果",
-    "香辣牛肉粒",
-    "藤椒凤爪",
-    "玉米脆条烧烤味",
-    "香辣海苔天妇罗",
-    "辣条大礼包",
-    "麻辣魔芋爽",
+    '辣味海苔脆',
+    '海苔香脆混合包',
+    '黑胡椒薯角',
+    '麻辣小薯角',
+    '椒盐腰果',
+    '香辣牛肉粒',
+    '藤椒凤爪',
+    '玉米脆条烧烤味',
+    '香辣海苔天妇罗',
+    '辣条大礼包',
+    '麻辣魔芋爽',
   ];
-  const r = await turn("还是来点吃的，我不吃辣");
+  const r = await turn('还是来点吃的，我不吃辣');
   const heavy = names(r).filter((n) => HEAVY.includes(n));
   expect(
-    "忌辣 → 无中辣/重辣（微辣留作备选）",
+    '忌辣 → 无中辣/重辣（微辣留作备选）',
     names(r).length === 3 && !heavy.length,
-    names(r).join("/"),
+    names(r).join('/'),
   );
 }
 
 // ── 10. 跨轮场景：场景信息散在几轮里也要接住 ───────
 {
-  await turn("今天想出去玩");
-  await turn("去办公室加班吧");
-  const r = await turn("这个时候想带点什么吃的");
+  await turn('今天想出去玩');
+  await turn('去办公室加班吧');
+  const r = await turn('这个时候想带点什么吃的');
   const OFFICE = [
-    "海苔脆片原味装",
-    "芝麻海苔卷",
-    "夹心海苔脆",
-    "低盐海苔片",
-    "海苔肉松卷",
-    "阳光芒果干轻甜装",
-    "无糖芒果干",
-    "每日坚果混合包",
-    "巴旦木原味罐装",
-    "椒盐腰果",
-    "海盐开心果",
-    "全麦燕麦饼干",
-    "红枣核桃软糕",
-    "黑糖沙琪玛",
-    "原味猪肉脯",
-    "五香鹌鹑蛋",
-    "手撕鱿鱼丝",
-    "椰香香蕉片",
-    "红薯脆片原味",
-    "秋葵脆蔬菜干",
-    "综合蔬菜脆片",
-    "草莓冻干",
-    "黄桃果脯",
-    "陈皮梅",
-    "薄荷润喉糖",
-    "黑巧克力72%",
-    "海苔肉松小贝",
+    '海苔脆片原味装',
+    '芝麻海苔卷',
+    '夹心海苔脆',
+    '低盐海苔片',
+    '海苔肉松卷',
+    '阳光芒果干轻甜装',
+    '无糖芒果干',
+    '每日坚果混合包',
+    '巴旦木原味罐装',
+    '椒盐腰果',
+    '海盐开心果',
+    '全麦燕麦饼干',
+    '红枣核桃软糕',
+    '黑糖沙琪玛',
+    '原味猪肉脯',
+    '五香鹌鹑蛋',
+    '手撕鱿鱼丝',
+    '椰香香蕉片',
+    '红薯脆片原味',
+    '秋葵脆蔬菜干',
+    '综合蔬菜脆片',
+    '草莓冻干',
+    '黄桃果脯',
+    '陈皮梅',
+    '薄荷润喉糖',
+    '黑巧克力72%',
+    '海苔肉松小贝',
   ];
   const hit = names(r).filter((n) => OFFICE.includes(n));
   expect(
-    "跨轮场景：办公室在前、要零食在后 → 办公室款",
+    '跨轮场景：办公室在前、要零食在后 → 办公室款',
     names(r).length === 3 && hit.length >= 2,
-    names(r).join("/"),
+    names(r).join('/'),
   );
 }
 
 // ── 11. 偏好持久化链路：profile 有内容返回 ─────────
 expect(
-  "响应携带 profile 快照",
-  typeof profile === "object" && Object.keys(profile).length > 0,
+  '响应携带 profile 快照',
+  typeof profile === 'object' && Object.keys(profile).length > 0,
   JSON.stringify(profile),
 );
 
@@ -518,31 +503,27 @@ expect(
   testUsers.push(uid);
   const askAs = (m) => ask(m, { userId: uid });
 
-  await askAs("来点吃的，我不吃辣");
-  const q = await askAs("你记得我什么");
+  await askAs('来点吃的，我不吃辣');
+  const q = await askAs('你记得我什么');
+  expect('忌口写进长期记忆 → 查得到', /不吃辣/.test(q.data.reply || ''), q.data.reply);
   expect(
-    "忌口写进长期记忆 → 查得到",
-    /不吃辣/.test(q.data.reply || ""),
-    q.data.reply,
-  );
-  expect(
-    "响应带记忆快照（前端据此纠偏本地缓存）",
+    '响应带记忆快照（前端据此纠偏本地缓存）',
     Array.isArray(q.data.memory?.core_profile) &&
-      q.data.memory.core_profile.some((t) => t.includes("不吃辣")),
+      q.data.memory.core_profile.some((t) => t.includes('不吃辣')),
     JSON.stringify(q.data.memory?.core_profile || []),
   );
 
-  const d = await askAs("忘掉我不吃辣");
+  const d = await askAs('忘掉我不吃辣');
   expect(
-    "说「忘掉」→ 后端真删且回 memory_action",
-    d.data.memory_action === "deleted" && /删了/.test(d.data.reply || ""),
+    '说「忘掉」→ 后端真删且回 memory_action',
+    d.data.memory_action === 'deleted' && /删了/.test(d.data.reply || ''),
     `${d.data.memory_action} / ${d.data.reply}`,
   );
 
   // 空状态文案里本来就拿「我不吃辣」举例子，所以只能断言结构化快照，不能拿 reply 做文本匹配
-  const q2 = await askAs("你记得我什么");
+  const q2 = await askAs('你记得我什么');
   expect(
-    "删完再查 → 确实没了",
+    '删完再查 → 确实没了',
     !(q2.data.memory?.core_profile || []).length &&
       !(q2.data.memory?.active_fragments || []).length,
     JSON.stringify(q2.data.memory || {}),
@@ -553,20 +534,12 @@ expect(
 {
   const uid = `smoke_clear_${Date.now()}`;
   testUsers.push(uid);
-  await ask("来点吃的，我不吃辣", { userId: uid });
-  const c = await ask("全都忘掉", { userId: uid });
-  expect(
-    "「全都忘掉」→ 后端确认清空",
-    c.data.memory_action === "cleared",
-    c.data.reply,
-  );
+  await ask('来点吃的，我不吃辣', { userId: uid });
+  const c = await ask('全都忘掉', { userId: uid });
+  expect('「全都忘掉」→ 后端确认清空', c.data.memory_action === 'cleared', c.data.reply);
 
-  const q = await ask("你记得我什么", { userId: uid });
-  expect(
-    "清空后再查 → 空的",
-    /还没记下啥/.test(q.data.reply || ""),
-    q.data.reply,
-  );
+  const q = await ask('你记得我什么', { userId: uid });
+  expect('清空后再查 → 空的', /还没记下啥/.test(q.data.reply || ''), q.data.reply);
 }
 
 // ── 14. 记忆按用户隔离，不串桶 ───────────────────
@@ -574,10 +547,10 @@ expect(
   const a = `smoke_iso_a_${Date.now()}`;
   const b = `smoke_iso_b_${Date.now()}`;
   testUsers.push(a, b);
-  await ask("来点吃的，我不吃辣", { userId: a });
-  const other = await ask("你记得我什么", { userId: b });
+  await ask('来点吃的，我不吃辣', { userId: a });
+  const other = await ask('你记得我什么', { userId: b });
   expect(
-    "换个人 → 看不到别人的记忆",
+    '换个人 → 看不到别人的记忆',
     !(other.data.memory?.core_profile || []).length,
     JSON.stringify(other.data.memory?.core_profile || []),
   );
@@ -592,62 +565,58 @@ expect(
   const now = new Date().toISOString();
   let store = {};
   try {
-    store = JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8"));
+    store = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
   } catch {
     store = {};
   }
   const seed = (list) => {
     store[uid] = list;
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify(store, null, 2), "utf8");
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(store, null, 2), 'utf8');
   };
 
   const oldRec = {
     id: `m_old_${Date.now()}`,
-    layer: "core_profile",
-    keyword: "不吃辣",
-    content: "不吃辣",
-    polarity: "拒绝",
-    status: "active",
-    source: "对话提取",
+    layer: 'core_profile',
+    keyword: '不吃辣',
+    content: '不吃辣',
+    polarity: '拒绝',
+    status: 'active',
+    source: '对话提取',
     created_at: now,
     updated_at: now,
   };
   const pendingRec = {
     id: `m_pending_${Date.now()}`,
-    layer: "fragment_memory",
-    keyword: "待确认_不吃辣",
-    content: "不吃辣=喜欢辣",
-    category: "口味",
-    polarity: "喜欢",
-    status: "pending",
-    source: "对话提取",
+    layer: 'fragment_memory',
+    keyword: '待确认_不吃辣',
+    content: '不吃辣=喜欢辣',
+    category: '口味',
+    polarity: '喜欢',
+    status: 'pending',
+    source: '对话提取',
     created_at: now,
     updated_at: now,
   };
 
   // Deny path
   seed([{ ...oldRec }, { ...pendingRec }]);
-  const denied = await ask("不是", { userId: uid });
-  expect(
-    "否认待确认 → 本地直接办结",
-    denied.data.memory_action === "resolved",
-    denied.data.reply,
-  );
+  const denied = await ask('不是', { userId: uid });
+  expect('否认待确认 → 本地直接办结', denied.data.memory_action === 'resolved', denied.data.reply);
 
   // Confirm path
   seed([{ ...oldRec }, { ...pendingRec, id: `m_pending2_${Date.now()}` }]);
-  const confirmed = await ask("对", { userId: uid });
+  const confirmed = await ask('对', { userId: uid });
   expect(
-    "确认待确认 → 本地直接办结",
-    confirmed.data.memory_action === "resolved",
+    '确认待确认 → 本地直接办结',
+    confirmed.data.memory_action === 'resolved',
     confirmed.data.reply,
   );
 
-  const after = await ask("你记得我什么", { userId: uid });
+  const after = await ask('你记得我什么', { userId: uid });
   const core = after.data.memory?.core_profile || [];
   expect(
-    "确认后旧的偏好作废、改口的新偏好生效",
-    core.length === 1 && core[0].includes("喜欢辣"),
+    '确认后旧的偏好作废、改口的新偏好生效',
+    core.length === 1 && core[0].includes('喜欢辣'),
     JSON.stringify(core),
   );
 }
@@ -662,53 +631,53 @@ expect(
 {
   const readStore = () => {
     try {
-      return JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8"));
+      return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
     } catch {
       return {};
     }
   };
   const recs = (uid) => readStore()[uid] || [];
   const activeCore = (uid) =>
-    recs(uid).filter((r) => r.layer === "core_profile" && r.status === "active");
+    recs(uid).filter((r) => r.layer === 'core_profile' && r.status === 'active');
 
   // A. 改口撞忌口 → 挂 pending，且确认前旧忌口原样保留
   const uidA = `smoke_clash_${Date.now()}`;
   testUsers.push(uidA);
-  await ask("我不吃辣", { userId: uidA });
-  await ask("我平时都喜欢吃辣的", { userId: uidA });
-  const pendingA = recs(uidA).filter((r) => r.status === "pending");
+  await ask('我不吃辣', { userId: uidA });
+  await ask('我平时都喜欢吃辣的', { userId: uidA });
+  const pendingA = recs(uidA).filter((r) => r.status === 'pending');
   expect(
-    "改口撞忌口 → 挂 pending 待确认",
-    pendingA.length === 1 && /辣/.test(pendingA[0].content || ""),
+    '改口撞忌口 → 挂 pending 待确认',
+    pendingA.length === 1 && /辣/.test(pendingA[0].content || ''),
     JSON.stringify(recs(uidA).map((r) => [r.layer, r.status, r.content])),
   );
   expect(
-    "冲突没确认前 → 旧忌口「不吃辣」原样保留",
-    activeCore(uidA).some((r) => /不吃辣/.test(r.content || "")),
+    '冲突没确认前 → 旧忌口「不吃辣」原样保留',
+    activeCore(uidA).some((r) => /不吃辣/.test(r.content || '')),
     JSON.stringify(activeCore(uidA).map((r) => r.content)),
   );
 
   // B. 重申同一个忌口 → 不算改口，不挂 pending（restatedAvoid 门槛）
   const uidB = `smoke_restate_${Date.now()}`;
   testUsers.push(uidB);
-  await ask("我不吃辣", { userId: uidB });
-  await ask("我说了我不吃辣", { userId: uidB });
+  await ask('我不吃辣', { userId: uidB });
+  await ask('我说了我不吃辣', { userId: uidB });
   expect(
-    "重申忌口 → 不挂 pending",
-    !recs(uidB).some((r) => r.status === "pending"),
+    '重申忌口 → 不挂 pending',
+    !recs(uidB).some((r) => r.status === 'pending'),
     JSON.stringify(recs(uidB).map((r) => [r.layer, r.status, r.content])),
   );
 
   // C. 确认改口 → pending 办结、旧忌口作废、新口味转正
-  const confirmed = await ask("对", { userId: uidA });
+  const confirmed = await ask('对', { userId: uidA });
   expect(
-    "确认改口 → 本地直接办结",
-    confirmed.data.memory_action === "resolved",
+    '确认改口 → 本地直接办结',
+    confirmed.data.memory_action === 'resolved',
     confirmed.data.reply,
   );
   expect(
-    "确认后 → 生效的 core_profile 恰好一条且是喜欢辣",
-    activeCore(uidA).length === 1 && /辣/.test(activeCore(uidA)[0].content || ""),
+    '确认后 → 生效的 core_profile 恰好一条且是喜欢辣',
+    activeCore(uidA).length === 1 && /辣/.test(activeCore(uidA)[0].content || ''),
     JSON.stringify(recs(uidA).map((r) => [r.layer, r.status, r.content])),
   );
 }
@@ -717,8 +686,8 @@ expect(
 // 这条用来兜住 ADMIN_PASSWORD_HASH 被误删/漏配的情况：真没配时后台是禁用的，
 // 但那不该是默认状态，跑一次就知道。
 {
-  const adminUrl = BASE.replace(/\/api\/ai\/?$/, "/admin");
-  let html = "";
+  const adminUrl = BASE.replace(/\/api\/ai\/?$/, '/admin');
+  let html = '';
   let status = 0;
   try {
     const res = await fetch(adminUrl);
@@ -728,10 +697,8 @@ expect(
     html = e.message;
   }
   expect(
-    "/admin 已启用（口令已配置 → 显示登录表单）",
-    status === 200 &&
-      html.includes("输入管理口令进入") &&
-      !html.includes("后台未启用"),
+    '/admin 已启用（口令已配置 → 显示登录表单）',
+    status === 200 && html.includes('输入管理口令进入') && !html.includes('后台未启用'),
     `GET ${adminUrl} → ${status}`,
   );
 }
@@ -740,49 +707,46 @@ expect(
 {
   const uid = `smoke_allergy_${Date.now()}`;
   testUsers.push(uid);
-  await ask("我海产品过敏", { userId: uid });
-  const r = await ask("来点咸的", { userId: uid });
+  await ask('我海产品过敏', { userId: uid });
+  const r = await ask('来点咸的', { userId: uid });
   const cards = r.data.recommendations || [];
-  const risky = cards.filter((c) =>
-    (c.risk_notes || []).some((n) => /海产品/.test(n)),
-  );
+  const risky = cards.filter((c) => (c.risk_notes || []).some((n) => /海产品/.test(n)));
   expect(
-    "海产品过敏 → 推荐里没有含海产品过敏原的款",
+    '海产品过敏 → 推荐里没有含海产品过敏原的款',
     cards.length > 0 && risky.length === 0,
-    cards.map((c) => c.name).join("/"),
+    cards.map((c) => c.name).join('/'),
   );
   expect(
-    "海产品过敏 → 绝不推海苔脆片原味装",
-    !cards.some((c) => c.name === "海苔脆片原味装"),
-    cards.map((c) => c.name).join("/"),
+    '海产品过敏 → 绝不推海苔脆片原味装',
+    !cards.some((c) => c.name === '海苔脆片原味装'),
+    cards.map((c) => c.name).join('/'),
   );
 }
 
 // ── 16. userId 清洗：路径穿越 / 原型链保留字都要挡住 ──
 {
-  const keys = () =>
-    Object.keys(JSON.parse(fs.readFileSync(MEMORY_FILE, "utf8")));
+  const keys = () => Object.keys(JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8')));
 
   // 路径穿越：斜杠和点被剥掉，清洗后落到一个普通 key 上，记忆能正常读写
-  const raw = "u_bad/id/../../etc/passwd";
-  const cleaned = "u_badidetcpasswd";
+  const raw = 'u_bad/id/../../etc/passwd';
+  const cleaned = 'u_badidetcpasswd';
   testUsers.push(cleaned);
 
-  await ask("我不吃辣", { userId: raw });
-  const q = await ask("你记得我什么", { userId: raw });
+  await ask('我不吃辣', { userId: raw });
+  const q = await ask('你记得我什么', { userId: raw });
   const prof = q.data.memory?.core_profile || [];
   expect(
-    "userId 清洗：路径穿越字符被剥掉，记忆照常读写",
+    'userId 清洗：路径穿越字符被剥掉，记忆照常读写',
     q.status === 200 && prof.length === 1 && keys().includes(cleaned),
     JSON.stringify(prof),
   );
 
   // 原型链保留字：constructor 是纯字母，字符白名单拦不住它。
   // 不挡的话 store[userId] 会拿到 Object.prototype.constructor（函数），一 .slice 就 500。
-  const r2 = await ask("我不吃辣", { userId: "constructor" });
+  const r2 = await ask('我不吃辣', { userId: 'constructor' });
   expect(
-    "constructor 当 userId → 不落盘且不崩",
-    r2.status === 200 && !keys().includes("constructor"),
+    'constructor 当 userId → 不落盘且不崩',
+    r2.status === 200 && !keys().includes('constructor'),
     `status=${r2.status}`,
   );
 }
@@ -792,11 +756,11 @@ expect(
   testUsers.push(uid);
 
   // 一句纯闲聊：口味 / 预算 / 忌口 / 场景一条都不沾，不该留下任何记忆
-  await ask("今天天气还行吧", { userId: uid });
-  const q = await ask("你记得我什么", { userId: uid });
+  await ask('今天天气还行吧', { userId: uid });
+  const q = await ask('你记得我什么', { userId: uid });
   const prof = q.data.memory?.core_profile || [];
   expect(
-    "没事实 → 不写记忆（no_action）",
+    '没事实 → 不写记忆（no_action）',
     q.status === 200 && prof.length === 0,
     JSON.stringify(prof),
   );
@@ -808,31 +772,31 @@ expect(
   const uidLong = `smoke_long_${Date.now()}`;
   testUsers.push(uidOnce, uidLong);
 
-  await ask("今天想吃辣", { userId: uidOnce });
-  const a = await ask("你记得我什么", { userId: uidOnce });
+  await ask('今天想吃辣', { userId: uidOnce });
+  const a = await ask('你记得我什么', { userId: uidOnce });
   const pa = a.data.memory?.core_profile || [];
 
-  await ask("我一直喜欢辣的", { userId: uidLong });
-  const b = await ask("你记得我什么", { userId: uidLong });
+  await ask('我一直喜欢辣的', { userId: uidLong });
+  const b = await ask('你记得我什么', { userId: uidLong });
   const pb = b.data.memory?.core_profile || [];
 
-  expect("一次性需求不记成长期口味", pa.length === 0, JSON.stringify(pa));
-  expect("带长期副词 → 记成口味", pb.length === 1, JSON.stringify(pb));
+  expect('一次性需求不记成长期口味', pa.length === 0, JSON.stringify(pa));
+  expect('带长期副词 → 记成口味', pb.length === 1, JSON.stringify(pb));
 }
 
 // ── 19. §5.1 全清必须先于单条删除 ────────────────────────────
 {
   const uid = `smoke_clear_${Date.now()}`;
   testUsers.push(uid);
-  await ask("我不吃辣", { userId: uid });
+  await ask('我不吃辣', { userId: uid });
 
   // 「全都忘掉」同时命中 clear 与 delete 的正则，必须判成 clear
-  const r = await ask("全都忘掉", { userId: uid });
-  const after = await ask("你记得我什么", { userId: uid });
+  const r = await ask('全都忘掉', { userId: uid });
+  const after = await ask('你记得我什么', { userId: uid });
   const core = after.data.memory?.core_profile || [];
   expect(
-    "全清先于单删：memory_action=cleared 且记忆已空",
-    r.status === 200 && r.data.memory_action === "cleared" && core.length === 0,
+    '全清先于单删：memory_action=cleared 且记忆已空',
+    r.status === 200 && r.data.memory_action === 'cleared' && core.length === 0,
     `action=${r.data.memory_action} core=${JSON.stringify(core)}`,
   );
 }
@@ -843,20 +807,20 @@ expect(
   testUsers.push(uid);
 
   // 记忆是空的 → 删不到，必须回「你要我忘掉哪条」，不能瞎删
-  const miss = await ask("忘掉我不吃辣", { userId: uid });
+  const miss = await ask('忘掉我不吃辣', { userId: uid });
   expect(
-    "删不到 → 回「你要我忘掉哪条」，不猜",
+    '删不到 → 回「你要我忘掉哪条」，不猜',
     miss.status === 200 &&
-      miss.data.reply.includes("你要我忘掉哪条") &&
-      miss.data.memory_action !== "deleted",
+      miss.data.reply.includes('你要我忘掉哪条') &&
+      miss.data.memory_action !== 'deleted',
     `${miss.data.reply} / action=${miss.data.memory_action}`,
   );
 
   // 本来就空 → 清空走另一句文案
-  const none = await ask("全都忘掉", { userId: uid });
+  const none = await ask('全都忘掉', { userId: uid });
   expect(
-    "本来就没记忆 → 回「本来也没记着啥」",
-    none.status === 200 && none.data.reply.includes("本来也没记着啥"),
+    '本来就没记忆 → 回「本来也没记着啥」',
+    none.status === 200 && none.data.reply.includes('本来也没记着啥'),
     none.data.reply,
   );
 }
@@ -865,63 +829,59 @@ expect(
 {
   const uid = `smoke_tpl_${Date.now()}`;
   testUsers.push(uid);
-  await ask("我不吃辣", { userId: uid });
+  await ask('我不吃辣', { userId: uid });
 
   // 有内容时的问答模板（注意：空状态文案里含「我不吃辣」字样，不能拿它做文本匹配）
-  const q = await ask("你记得我什么", { userId: uid });
+  const q = await ask('你记得我什么', { userId: uid });
   expect(
-    "记忆问答模板：含「记着这些」+ 收尾追问",
+    '记忆问答模板：含「记着这些」+ 收尾追问',
     q.status === 200 &&
-      q.data.reply.includes("记着这些") &&
-      q.data.reply.includes("还有要我记的吗"),
+      q.data.reply.includes('记着这些') &&
+      q.data.reply.includes('还有要我记的吗'),
     q.data.reply,
   );
 
   // 左侧栏选了口味 → 约束必须生效：卡片都落在咸味，且响应回显 filters
-  const r = await ask("来点吃的", {
+  const r = await ask('来点吃的', {
     userId: uid,
-    filters: { flavor: "咸味" },
+    filters: { flavor: '咸味' },
   });
   const cards = r.data.recommendations || [];
-  const offFlavor = cards.filter(
-    (c) => !(c.taste_tags || []).some((t) => t.includes("咸")),
-  );
+  const offFlavor = cards.filter((c) => !(c.taste_tags || []).some((t) => t.includes('咸')));
   expect(
-    "左侧栏选了咸味 → 卡片都落在咸味且 filters 回显",
+    '左侧栏选了咸味 → 卡片都落在咸味且 filters 回显',
     r.status === 200 &&
       cards.length > 0 &&
       offFlavor.length === 0 &&
-      r.data.filters?.flavor === "咸味",
-    `cards=${cards.map((c) => c.name).join("/")} filters=${JSON.stringify(r.data.filters)}`,
+      r.data.filters?.flavor === '咸味',
+    `cards=${cards.map((c) => c.name).join('/')} filters=${JSON.stringify(r.data.filters)}`,
   );
 }
 // ── 21.5 左侧栏选甜味 → 卡片都落甜味（适配新库：蜂蜜黄油薯角 / 黄桃果脯 等）────
 {
   const uid = `smoke_sweet_${Date.now()}`;
   testUsers.push(uid);
-  const r = await ask("来点吃的", {
+  const r = await ask('来点吃的', {
     userId: uid,
-    filters: { flavor: "甜味" },
+    filters: { flavor: '甜味' },
   });
   const cards = r.data.recommendations || [];
-  const offFlavor = cards.filter(
-    (c) => !(c.taste_tags || []).some((t) => t.includes("甜")),
-  );
+  const offFlavor = cards.filter((c) => !(c.taste_tags || []).some((t) => t.includes('甜')));
   expect(
-    "左侧栏选了甜味 → 卡片都落在甜味",
+    '左侧栏选了甜味 → 卡片都落在甜味',
     r.status === 200 && cards.length > 0 && offFlavor.length === 0,
-    `cards=${cards.map((c) => c.name).join("/")}`,
+    `cards=${cards.map((c) => c.name).join('/')}`,
   );
 }
 // ── 22. SSE 流式端点：事件链完整 ─────────────────────────────
 {
-  const uid = "smoke_sse_" + Date.now();
+  const uid = 'smoke_sse_' + Date.now();
   testUsers.push(uid);
 
-  const res = await fetch(BASE + "/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "今天好累", userId: uid }),
+  const res = await fetch(BASE + '/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: '今天好累', userId: uid }),
   });
 
   const text = await res.text();
@@ -933,208 +893,200 @@ expect(
   } catch {}
 
   expect(
-    "SSE：stage / delta / final 齐全，final 带非空 reply",
+    'SSE：stage / delta / final 齐全，final 带非空 reply',
     res.status === 200 &&
-      (res.headers.get("content-type") || "").includes("text/event-stream") &&
-      events.includes("stage") &&
-      events.includes("delta") &&
-      events.includes("final") &&
-      typeof final?.reply === "string" &&
+      (res.headers.get('content-type') || '').includes('text/event-stream') &&
+      events.includes('stage') &&
+      events.includes('delta') &&
+      events.includes('final') &&
+      typeof final?.reply === 'string' &&
       final.reply.length > 0,
-    "events=" +
-      events.join(",") +
-      " final=" +
-      JSON.stringify(final)?.slice(0, 80),
+    'events=' + events.join(',') + ' final=' + JSON.stringify(final)?.slice(0, 80),
   );
 }
 // ── 23. 新建会话：history 为空，长期记忆照常召回 ───────────────
 // 「+ 新对话」是纯前端操作（清空 messages、重置推荐上下文），
 // 后端收到的就是 history: []。这里要确认两件事：不报错，且长期忌口还在。
 {
-  const uid = "smoke_newchat_" + Date.now();
+  const uid = 'smoke_newchat_' + Date.now();
   testUsers.push(uid);
 
-  await ask("我不吃辣", { userId: uid });
+  await ask('我不吃辣', { userId: uid });
 
   // 模拟开完新对话后的第一条消息：不带任何上文
-  const r = await ask("来点吃的", { userId: uid, history: [] });
+  const r = await ask('来点吃的', { userId: uid, history: [] });
   const prof = r.data.memory?.core_profile || [];
 
   expect(
-    "新会话（history 为空）→ 不报错，长期忌口照常召回",
-    r.status === 200 && prof.some((t) => t.includes("辣")),
-    "memory=" + JSON.stringify(r.data.memory),
+    '新会话（history 为空）→ 不报错，长期忌口照常召回',
+    r.status === 200 && prof.some((t) => t.includes('辣')),
+    'memory=' + JSON.stringify(r.data.memory),
   );
 }
 // ── 24. 催货升级：追着要货时必须给卡片 ─────────────────────────
 // 「你说说」「哪几样呢」是极强的要货信号。历史上它既不被 allowRecommend 放行、
 // 也不会从 chat 升级成 recommend，结果用户问到第三轮还见不到货。
 {
-  const uid = "smoke_urge_" + Date.now();
+  const uid = 'smoke_urge_' + Date.now();
   testUsers.push(uid);
 
-  const r1 = await ask("那几样呢？", { userId: uid });
+  const r1 = await ask('那几样呢？', { userId: uid });
   expect(
-    "催货「那几样呢」→ 出卡片（普通接口）",
+    '催货「那几样呢」→ 出卡片（普通接口）',
     r1.status === 200 && (r1.data.recommendations || []).length > 0,
-    "cards=" + (r1.data.recommendations || []).length,
+    'cards=' + (r1.data.recommendations || []).length,
   );
 
   // SSE 那条路：历史上它漏过空头许诺防线，必须单独验一次
-  const sres = await fetch(BASE + "/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "你说说", userId: uid }),
+  const sres = await fetch(BASE + '/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: '你说说', userId: uid }),
   });
   const stext = await sres.text();
   const sfinal = sseEvents(stext).filter((d) => d.reply !== undefined);
   const sLast = sfinal[sfinal.length - 1] || {};
   expect(
-    "催货「你说说」→ 出卡片（SSE）",
+    '催货「你说说」→ 出卡片（SSE）',
     sres.status === 200 && (sLast.recommendations || []).length > 0,
-    "cards=" + (sLast.recommendations || []).length,
+    'cards=' + (sLast.recommendations || []).length,
   );
 
   // 催货兜底也绝不松硬约束：忌辣就是忌辣
-  await ask("我不吃辣", { userId: uid });
-  const r2 = await ask("你说说", { userId: uid });
+  await ask('我不吃辣', { userId: uid });
+  const r2 = await ask('你说说', { userId: uid });
   const spicy = (r2.data.recommendations || []).filter((c) =>
-    (c.taste_tags || []).some((t) => t.includes("辣")),
+    (c.taste_tags || []).some((t) => t.includes('辣')),
   );
   expect(
-    "忌辣后催货兜底 → 卡片不含辣（硬约束不松）",
-    r2.status === 200 &&
-      (r2.data.recommendations || []).length > 0 &&
-      spicy.length === 0,
-    "cards=" + (r2.data.recommendations || []).map((c) => c.name).join("/"),
+    '忌辣后催货兜底 → 卡片不含辣（硬约束不松）',
+    r2.status === 200 && (r2.data.recommendations || []).length > 0 && spicy.length === 0,
+    'cards=' + (r2.data.recommendations || []).map((c) => c.name).join('/'),
   );
 
   // 条件苛刻到选不出来时：催货不再继续追问，直接给兜底卡
-  await ask("给我找30元内、不辣、不甜、无坚果的", { userId: uid });
-  const r3 = await ask("那几样呢？", { userId: uid });
+  await ask('给我找30元内、不辣、不甜、无坚果的', { userId: uid });
+  const r3 = await ask('那几样呢？', { userId: uid });
   expect(
-    "苛刻条件 + 催货 → 也给兜底卡片，不再用文字安抚",
+    '苛刻条件 + 催货 → 也给兜底卡片，不再用文字安抚',
     r3.status === 200 && (r3.data.recommendations || []).length > 0,
-    "cards=" + (r3.data.recommendations || []).map((c) => c.name).join("/"),
+    'cards=' + (r3.data.recommendations || []).map((c) => c.name).join('/'),
   );
 }
 // ── 25. 忌口是死命令：硬要也不能给 ──────────────────────────────
 // 实测事故：用户说「我非要点麻辣魔芋爽」，AI 直接推了辣的卡片，
 // 追问一轮甚至说「那就点呗——8块」。忌口被"强制性句式"击穿了。
 {
-  const uid = "smoke_avoid_" + Date.now();
+  const uid = 'smoke_avoid_' + Date.now();
   testUsers.push(uid);
-  await ask("我不吃辣", { userId: uid });
+  await ask('我不吃辣', { userId: uid });
 
-  const r1 = await ask("我非要点一份麻辣魔芋爽", { userId: uid });
+  const r1 = await ask('我非要点一份麻辣魔芋爽', { userId: uid });
   expect(
-    "硬要忌口货 → 不出卡片 + 劝阻（普通接口）",
+    '硬要忌口货 → 不出卡片 + 劝阻（普通接口）',
     r1.status === 200 &&
       (r1.data.recommendations || []).length === 0 &&
-      /不吃辣/.test(r1.data.reply || ""),
-    "cards=" +
-      (r1.data.recommendations || []).length +
-      " reply=" +
-      (r1.data.reply || ""),
+      /不吃辣/.test(r1.data.reply || ''),
+    'cards=' + (r1.data.recommendations || []).length + ' reply=' + (r1.data.reply || ''),
   );
 
   // SSE 那条路单独验一次：历史上它漏过防线
-  const sres = await fetch(BASE + "/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "我就要麻辣魔芋爽", userId: uid }),
+  const sres = await fetch(BASE + '/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: '我就要麻辣魔芋爽', userId: uid }),
   });
   const stext = await sres.text();
-  const sLast = sseEvents(stext).filter((d) => d.reply !== undefined).pop() || {};
+  const sLast =
+    sseEvents(stext)
+      .filter((d) => d.reply !== undefined)
+      .pop() || {};
   expect(
-    "硬要忌口货 → 不出卡片 + 劝阻（SSE）",
+    '硬要忌口货 → 不出卡片 + 劝阻（SSE）',
     sres.status === 200 &&
       (sLast.recommendations || []).length === 0 &&
-      /不吃辣/.test(sLast.reply || ""),
-    "cards=" +
-      (sLast.recommendations || []).length +
-      " reply=" +
-      (sLast.reply || ""),
+      /不吃辣/.test(sLast.reply || ''),
+    'cards=' + (sLast.recommendations || []).length + ' reply=' + (sLast.reply || ''),
   );
 
   // 没有强制词，只是点名打听：照样不能给卡片
-  const r2 = await ask("麻辣魔芋爽怎么样", { userId: uid });
+  const r2 = await ask('麻辣魔芋爽怎么样', { userId: uid });
   expect(
-    "点名打听忌口货 → 卡片也不给",
+    '点名打听忌口货 → 卡片也不给',
     r2.status === 200 && (r2.data.recommendations || []).length === 0,
-    "cards=" + (r2.data.recommendations || []).map((c) => c.name).join("/"),
+    'cards=' + (r2.data.recommendations || []).map((c) => c.name).join('/'),
   );
 
   // 反向：没有忌口的人点名打听，卡片必须照给（别拦过头）
-  const uid2 = "smoke_noavoid_" + Date.now();
+  const uid2 = 'smoke_noavoid_' + Date.now();
   testUsers.push(uid2);
-  const r3 = await ask("麻辣魔芋爽啥样", { userId: uid2 });
+  const r3 = await ask('麻辣魔芋爽啥样', { userId: uid2 });
   expect(
-    "无忌口时点名打听 → 卡片照给（不误伤）",
+    '无忌口时点名打听 → 卡片照给（不误伤）',
     r3.status === 200 && (r3.data.recommendations || []).length > 0,
-    "cards=" + (r3.data.recommendations || []).map((c) => c.name).join("/"),
+    'cards=' + (r3.data.recommendations || []).map((c) => c.name).join('/'),
   );
 }
 // ── 26. 兜底不许甩反问、不许自曝失败 ──────────────────────
 {
-  const uid = "smoke_tone_" + Date.now();
+  const uid = 'smoke_tone_' + Date.now();
   testUsers.push(uid);
   // 「嗯？」「？你在说啥」这类反问读起来像在质问用户。
   // 我们自己的解析失败，不能让用户听着像被怼
-  const r = await ask("djfkl", { userId: uid });
-  const txt = (r.data.reply || "").trim();
+  const r = await ask('djfkl', { userId: uid });
+  const txt = (r.data.reply || '').trim();
   expect(
-    "乱码兜底 → 不用反问句（不许「嗯？」开头）",
+    '乱码兜底 → 不用反问句（不许「嗯？」开头）',
     r.status === 200 && !!txt && !/^[嗯啊？?]/.test(txt),
     txt,
   );
 }
 {
-  const uid = "smoke_intro_guard_" + Date.now();
+  const uid = 'smoke_intro_guard_' + Date.now();
   testUsers.push(uid);
   // 「说说」会被猜成 introduce，可它压根没有商品名——
   // 以前出口直接吐「emmm 这个我还不太了解」，等于让用户替解析失败买单
-  const r = await ask("说说", { userId: uid });
+  const r = await ask('说说', { userId: uid });
   expect(
-    "抠不出商品名的 introduce → 不吐自曝失败话术",
-    r.status === 200 && !/我还不太了解/.test(r.data.reply || ""),
+    '抠不出商品名的 introduce → 不吐自曝失败话术',
+    r.status === 200 && !/我还不太了解/.test(r.data.reply || ''),
     r.data.reply,
   );
 }
 // ── 27. 已知口味不许再追问（长期偏好 / UI 选择都要算数）───────────
 {
-  const uid = 'smoke_intake_' + Date.now()
-  testUsers.push(uid)
+  const uid = 'smoke_intake_' + Date.now();
+  testUsers.push(uid);
   // 长期偏好记着"甜味"，一句模糊的「有什么好吃的」就该直接出卡片——
   // 以前这里张口还问"爱吃甜的还是咸的"：同一个偏好，过滤时信、判定时不信
-  const r1 = await ask('有什么好吃的', { userId: uid, userProfile: { flavor: '甜味' } })
+  const r1 = await ask('有什么好吃的', { userId: uid, userProfile: { flavor: '甜味' } });
   expect(
     '长期偏好带口味 → 直接出卡片不追问',
     r1.status === 200 && names(r1).length > 0 && !/甜的还是咸的/.test(r1.data.reply || ''),
-    names(r1).join('/') + ' | ' + (r1.data.reply || '').slice(0, 50)
-  )
+    names(r1).join('/') + ' | ' + (r1.data.reply || '').slice(0, 50),
+  );
 }
 {
-  const uid = 'smoke_intake_ui_' + Date.now()
-  testUsers.push(uid)
+  const uid = 'smoke_intake_ui_' + Date.now();
+  testUsers.push(uid);
   // UI 侧栏选的口味同理：那是用户亲手点的，不是模型脑补
-  const r = await ask('有什么好吃的', { userId: uid, filters: { flavor: '甜味' } })
+  const r = await ask('有什么好吃的', { userId: uid, filters: { flavor: '甜味' } });
   expect(
     'UI 选择器带口味 → 直接出卡片不追问',
     r.status === 200 && names(r).length > 0 && !/甜的还是咸的/.test(r.data.reply || ''),
-    names(r).join('/') + ' | ' + (r.data.reply || '').slice(0, 50)
-  )
+    names(r).join('/') + ' | ' + (r.data.reply || '').slice(0, 50),
+  );
 }
 {
-  const uid = 'smoke_intake_vague_' + Date.now()
-  testUsers.push(uid)
+  const uid = 'smoke_intake_vague_' + Date.now();
+  testUsers.push(uid);
   // 什么偏好都没有 → 该追问还得追问（防脑补基线不能丢）
-  const r = await ask('有什么好吃的', { userId: uid })
+  const r = await ask('有什么好吃的', { userId: uid });
   expect(
     '无任何偏好 → 仍要追问不出卡片',
     r.status === 200 && !names(r).length && !!r.data.reply?.trim(),
-    names(r).join('/') + ' | ' + (r.data.reply || '').slice(0, 50)
-  )
+    names(r).join('/') + ' | ' + (r.data.reply || '').slice(0, 50),
+  );
 }
 // ── 28. 无大脑降级：大脑挂了也不能整店打烊 ──────────────────────
 // 历史问题：callBrain 一抛错（Key 欠费 402 / 两个 provider 都超时），
@@ -1143,59 +1095,59 @@ expect(
 // 注：Key 正常时这些用例走的是模型路径，断言同样成立（它们守的是"下限"）；
 // Key 欠费时它们就是降级链路本身的回归。
 {
-  const uid = "smoke_nobrain_" + Date.now();
+  const uid = 'smoke_nobrain_' + Date.now();
   testUsers.push(uid);
 
   // 明确开口要货 → 必须出卡片，且 reply 有本地合成的话术
-  const r1 = await ask("来点不辣的", { userId: uid });
+  // （2026-11-03 起气泡不列 `1. XX｜X元` 明细，改断言"收尾话口在 + 没有编号清单"）
+  const r1 = await ask('来点不辣的', { userId: uid });
   expect(
-    "无大脑降级：开口要货 → 照出卡片 + 本地合成话术",
+    '无大脑降级：开口要货 → 照出卡片 + 本地合成话术',
     r1.status === 200 &&
       names(r1).length > 0 &&
       !!r1.data.reply?.trim() &&
-      /1\./.test(r1.data.reply),
-    `cards=${names(r1).join("/")} | ${(r1.data.reply || "").slice(0, 60)}`,
+      /这三样|要不要我再换一批/.test(r1.data.reply) &&
+      !/^\s*\d+\s*[.、]/m.test(r1.data.reply),
+    `cards=${names(r1).join('/')} | ${(r1.data.reply || '').slice(0, 60)}`,
   );
 
   // 说过忌口：降级也绝不松硬约束
-  await ask("我不吃辣", { userId: uid });
-  const r2 = await ask("来点吃的", { userId: uid });
+  await ask('我不吃辣', { userId: uid });
+  const r2 = await ask('来点吃的', { userId: uid });
   const spicy = (r2.data.recommendations || []).filter((c) =>
-    (c.taste_tags || []).some((t) => t.includes("辣")),
+    (c.taste_tags || []).some((t) => t.includes('辣')),
   );
   expect(
-    "无大脑降级：忌口不放松（卡片不含辣）",
+    '无大脑降级：忌口不放松（卡片不含辣）',
     r2.status === 200 && (r2.data.recommendations || []).length > 0 && spicy.length === 0,
-    `cards=${(r2.data.recommendations || []).map((c) => c.name).join("/")}`,
+    `cards=${(r2.data.recommendations || []).map((c) => c.name).join('/')}`,
   );
 
   // 没开口要就不能自动推荐：降级不是"把货都端上来"的理由。
   // 断言落在"有正经话说"（本地陪聊池兜得住），而不是首字——
   // "嗯，我在。接着说呗"是朋友的话；不许的是把人话写成"嗯？"那种反问（那条由 §26 守）
-  const r3 = await ask("今天被领导骂了，烦死", { userId: uid });
+  const r3 = await ask('今天被领导骂了，烦死', { userId: uid });
   expect(
-    "无大脑降级：没开口要 → 仍然陪聊不出卡片",
-    r3.status === 200 &&
-      names(r3).length === 0 &&
-      (r3.data.reply || "").trim().length > 5,
-    `${names(r3).length} | ${(r3.data.reply || "").slice(0, 50)}`,
+    '无大脑降级：没开口要 → 仍然陪聊不出卡片',
+    r3.status === 200 && names(r3).length === 0 && (r3.data.reply || '').trim().length > 5,
+    `${names(r3).length} | ${(r3.data.reply || '').slice(0, 50)}`,
   );
 
   // 点名打听商品：介绍优先于推荐（别甩三张卡当回答），忌口货照样不给卡
-  const r4 = await ask("麻辣魔芋爽啥样", { userId: uid });
+  const r4 = await ask('麻辣魔芋爽啥样', { userId: uid });
   expect(
-    "无大脑降级：点名打听忌口货 → 不出卡片",
+    '无大脑降级：点名打听忌口货 → 不出卡片',
     r4.status === 200 && (r4.data.recommendations || []).length === 0,
-    `cards=${(r4.data.recommendations || []).map((c) => c.name).join("/")}`,
+    `cards=${(r4.data.recommendations || []).map((c) => c.name).join('/')}`,
   );
 
-  const uidClean = "smoke_nobrain_intro_" + Date.now();
+  const uidClean = 'smoke_nobrain_intro_' + Date.now();
   testUsers.push(uidClean);
-  const r5 = await ask("麻辣魔芋爽啥样", { userId: uidClean });
+  const r5 = await ask('麻辣魔芋爽啥样', { userId: uidClean });
   expect(
-    "无大脑降级：点名打听正常款 → 出卡片",
-    r5.status === 200 && names(r5).length === 1 && names(r5)[0] === "麻辣魔芋爽",
-    `cards=${names(r5).join("/")} | ${(r5.data.reply || "").slice(0, 40)}`,
+    '无大脑降级：点名打听正常款 → 出卡片',
+    r5.status === 200 && names(r5).length === 1 && names(r5)[0] === '麻辣魔芋爽',
+    `cards=${names(r5).join('/')} | ${(r5.data.reply || '').slice(0, 40)}`,
   );
 }
 
@@ -1203,20 +1155,20 @@ expect(
 // 人设第十节对模型这么要求；本地 pickTransition 以前不看表，
 // 上午推「加班」场景就会甩一句"深夜续命，安排——"。
 {
-  const uid = "smoke_daytime_" + Date.now();
+  const uid = 'smoke_daytime_' + Date.now();
   testUsers.push(uid);
   const hour = new Date().getHours();
   // 只在白天断言：夜里这话术本来就该说（脚本也可能在夜里跑），硬断言会变成假失败
   // 窗口同 2.9（23:00–05:00 算夜里），别再写死成 21
   if (hour >= 5 && hour < 23) {
-    const r = await ask("加班ing，来点吃的", { userId: uid });
+    const r = await ask('加班ing，来点吃的', { userId: uid });
     expect(
-      "白天推荐 → 本地过渡语不提「深夜/熬夜/通宵」",
-      r.status === 200 && !/深夜|熬夜|通宵/.test(r.data.reply || ""),
-      (r.data.reply || "").slice(0, 40),
+      '白天推荐 → 本地过渡语不提「深夜/熬夜/通宵」',
+      r.status === 200 && !/深夜|熬夜|通宵/.test(r.data.reply || ''),
+      (r.data.reply || '').slice(0, 40),
     );
   } else {
-    console.log("SKIP  白天话术用例（当前是夜里，跳过）");
+    console.log('SKIP  白天话术用例（当前是夜里，跳过）');
   }
 }
 
@@ -1226,48 +1178,49 @@ expect(
 // 反向防呆，结果落进本地陪聊池回"哈哈，然后呢？聊归聊"，货不见踪影；
 // 且模型按陪聊写的字先流式上屏、被 final 整段换掉——先出后删的文字闪烁。
 {
-  const uid = "smoke_craving_" + Date.now();
+  const uid = 'smoke_craving_' + Date.now();
   testUsers.push(uid);
-  await ask("我不吃辣", { userId: uid });
+  await ask('我不吃辣', { userId: uid });
 
-  const r = await ask("最近心痒痒，想吃零食", { userId: uid });
+  const r = await ask('最近心痒痒，想吃零食', { userId: uid });
   const spicy = names(r).length
-    ? r.data.recommendations.filter((c) =>
-        (c.taste_tags || []).some((t) => t.includes("辣")),
-      )
+    ? r.data.recommendations.filter((c) => (c.taste_tags || []).some((t) => t.includes('辣')))
     : [];
   expect(
-    "「想吃零食」→ 出卡片且不带陪聊腔（普通接口）",
+    '「想吃零食」→ 出卡片且不带陪聊腔（普通接口）',
     r.status === 200 &&
       names(r).length > 0 &&
       spicy.length === 0 &&
-      !/聊归聊|然后呢[？?]/.test(r.data.reply || ""),
-    `cards=${names(r).join("/")} | ${(r.data.reply || "").slice(0, 50)}`,
+      !/聊归聊|然后呢[？?]/.test(r.data.reply || ''),
+    `cards=${names(r).join('/')} | ${(r.data.reply || '').slice(0, 50)}`,
   );
 
   // SSE 同一场景：明确购买时模型的陪聊字不许先上屏（definiteGoods 拦 delta），
   // final 里必须有卡片
-  const sres = await fetch(BASE + "/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const sres = await fetch(BASE + '/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      message: "最近心痒痒，想吃零食",
+      message: '最近心痒痒，想吃零食',
       history: [
-        { role: "user", content: "我不吃辣" },
-        { role: "assistant", content: "行，不吃辣这条我记下了" },
+        { role: 'user', content: '我不吃辣' },
+        { role: 'assistant', content: '行，不吃辣这条我记下了' },
       ],
       userId: uid,
     }),
   });
   const stext = await sres.text();
   const sEvents = [...stext.matchAll(/^event: (\w+)$/gm)].map((m) => m[1]);
-  const sLast = sseEvents(stext).filter((d) => d.reply !== undefined).pop() || {};
+  const sLast =
+    sseEvents(stext)
+      .filter((d) => d.reply !== undefined)
+      .pop() || {};
   expect(
-    "「想吃零食」→ SSE 出卡片，无陪聊腔、无先出后删的整段替换",
+    '「想吃零食」→ SSE 出卡片，无陪聊腔、无先出后删的整段替换',
     sres.status === 200 &&
       (sLast.recommendations || []).length > 0 &&
-      !/聊归聊|然后呢[？?]/.test(sLast.reply || ""),
-    `events=${sEvents.join(",")} cards=${(sLast.recommendations || []).map((c) => c.name).join("/")}`,
+      !/聊归聊|然后呢[？?]/.test(sLast.reply || ''),
+    `events=${sEvents.join(',')} cards=${(sLast.recommendations || []).map((c) => c.name).join('/')}`,
   );
 }
 
@@ -1282,19 +1235,17 @@ expect(
 // 既不用起服务，也不必往生产代码里塞一个"改系统时间"的测试后门。
 // （import 时 Node 会打一条 MODULE_TYPELESS_PACKAGE_JSON 警告，无害，别当失败看。）
 {
-  const { timeContext, timeSection } = await import(
-    "../lib/llm/time-context.ts"
-  );
+  const { timeContext, timeSection } = await import('../lib/llm/time-context.ts');
   const at = (hhmm) => new Date(`2026-11-01T${hhmm}:00`);
 
   // [时刻, 期望时段, 期望 isNight]
   const cases = [
-    ["20:59", "晚上", false],
-    ["21:13", "晚上", false], // 事故现场：阈值退回 21 这条就红
-    ["22:59", "晚上", false],
-    ["23:00", "深夜", true],
-    ["04:59", "凌晨", true],
-    ["05:00", "早上", false],
+    ['20:59', '晚上', false],
+    ['21:13', '晚上', false], // 事故现场：阈值退回 21 这条就红
+    ['22:59', '晚上', false],
+    ['23:00', '深夜', true],
+    ['04:59', '凌晨', true],
+    ['05:00', '早上', false],
   ];
   for (const [hhmm, period, night] of cases) {
     const c = timeContext(at(hhmm));
@@ -1306,17 +1257,17 @@ expect(
   }
 
   // 光判对时段不够——真正穿帮的是提示词第十节那句话
-  const evening = timeSection(at("21:13"));
+  const evening = timeSection(at('21:13'));
   expect(
     '21:13 的提示词 → 提醒别问"怎么还没睡"，且不说「这个点还没睡」',
     /怎么还没睡/.test(evening) && !/这个点还没睡/.test(evening),
-    evening.replace(/\s+/g, " ").trim().slice(0, 80),
+    evening.replace(/\s+/g, ' ').trim().slice(0, 80),
   );
-  const night = timeSection(at("23:30"));
+  const night = timeSection(at('23:30'));
   expect(
-    "23:30 的提示词 → 走夜里的口径",
+    '23:30 的提示词 → 走夜里的口径',
     /这个点还没睡/.test(night),
-    night.replace(/\s+/g, " ").trim().slice(0, 80),
+    night.replace(/\s+/g, ' ').trim().slice(0, 80),
   );
 }
 
@@ -1327,16 +1278,16 @@ expect(
 function runGuard(file, args = []) {
   const r = spawnSync(
     process.execPath,
-    ["--import", "./scripts/ts-alias-register.mjs", `scripts/${file}`, ...args],
-    { cwd: ROOT, encoding: "utf8" },
+    ['--import', './scripts/ts-alias-register.mjs', `scripts/${file}`, ...args],
+    { cwd: ROOT, encoding: 'utf8' },
   );
-  const out = `${r.stdout || ""}${r.stderr || ""}`;
+  const out = `${r.stdout || ''}${r.stderr || ''}`;
   return out
     .split(/\r?\n/)
     .filter((l) => /^(PASS|FAIL)\s/.test(l))
     .map((l) => ({
-      ok: l.startsWith("PASS"),
-      body: l.replace(/^(PASS|FAIL)\s+/, ""),
+      ok: l.startsWith('PASS'),
+      body: l.replace(/^(PASS|FAIL)\s+/, ''),
     }));
 }
 
@@ -1353,18 +1304,18 @@ function runGuard(file, args = []) {
   testUsers.push(uid);
 
   // Node 的 MODULE_TYPELESS 警告之类混在输出里，runGuard 只认 `PASS / FAIL` 断言行
-  const lines = runGuard("fallback-guard.ts", [uid]);
+  const lines = runGuard('fallback-guard.ts', [uid]);
 
   if (!lines.length) {
     expect(
-      "兜底忌口守卫跑起来了",
+      '兜底忌口守卫跑起来了',
       false,
-      "没吐出任何断言行（脚本挂了？单独跑 scripts/fallback-guard.ts 看看）",
+      '没吐出任何断言行（脚本挂了？单独跑 scripts/fallback-guard.ts 看看）',
     );
   } else {
     for (const { ok, body } of lines) {
-      const [name, actual] = body.split(" — ");
-      expect(name.trim(), ok, (actual || "").trim());
+      const [name, actual] = body.split(' — ');
+      expect(name.trim(), ok, (actual || '').trim());
     }
   }
 }
@@ -1378,28 +1329,28 @@ function runGuard(file, args = []) {
   const uid = `smoke_budget_${Date.now()}`;
   testUsers.push(uid);
 
-  const r = await ask("有什么好吃的", [], {}, false, [], {}, uid);
+  const r = await ask('有什么好吃的', [], {}, false, [], {}, uid);
   const p = r.data.profile || {};
   // 比原来更严：不只是「不限」不许出现，而是**一条都不许有**
   // （用户什么都没提，模型脑补的 flavor / avoid / budget 全都不许沉淀）
   expect(
-    "没提任何偏好 → profile 为空（模型脑补的一条都不沉淀）",
+    '没提任何偏好 → profile 为空（模型脑补的一条都不沉淀）',
     Object.keys(p).length === 0,
     `profile=${JSON.stringify(p)}`,
   );
 
   // 白名单本身的纯函数断言（不限 / 自造档 / 场景 / 情绪 + 反向对照）
-  const lines = runGuard("profile-guard.ts");
+  const lines = runGuard('profile-guard.ts');
   if (!lines.length) {
     expect(
-      "偏好白名单守卫跑起来了",
+      '偏好白名单守卫跑起来了',
       false,
-      "没吐出任何断言行（脚本挂了？单独跑 scripts/profile-guard.ts 看看）",
+      '没吐出任何断言行（脚本挂了？单独跑 scripts/profile-guard.ts 看看）',
     );
   } else {
     for (const { ok, body } of lines) {
-      const [name, actual] = body.split(" — ");
-      expect(name.trim(), ok, (actual || "").trim());
+      const [name, actual] = body.split(' — ');
+      expect(name.trim(), ok, (actual || '').trim());
     }
   }
 }
@@ -1412,11 +1363,90 @@ function runGuard(file, args = []) {
   testUsers.push(uid);
 
   // 本地抽取认得出的忌口 → 必须记住（不依赖模型填不填）
-  const r = await ask("我花生过敏，来点吃的", [], {}, false, [], {}, uid);
+  const r = await ask('我花生过敏，来点吃的', [], {}, false, [], {}, uid);
   expect(
-    "说了「花生过敏」→ 侧栏记下忌口（有出处才记，但真说了必须记）",
-    (r.data.profile || {}).avoid === "花生过敏",
+    '说了「花生过敏」→ 侧栏记下忌口（有出处才记，但真说了必须记）',
+    (r.data.profile || {}).avoid === '花生过敏',
     `profile=${JSON.stringify(r.data.profile || {})}`,
+  );
+}
+
+// ── 35. 「忘掉我喜欢辣味」要真删（2026-11-03 修）────────────────────
+// 事故：`MEMORY_KEYWORD_PATTERN` 末尾挂着一条 `喜欢[^，。！？\s]{1,6}` 兜底，
+// 抠出来的是「喜欢辣味」而不是「辣味」——`deleteMemory` 拿它去 `includes`
+// 比不中 memory 里的 keyword，于是回"你要我忘掉哪条，我不猜"。
+// 端到端这条只能证明"通道通了"，真正盯着正则的是 profile-guard 的
+// 「删除关键词」那组纯函数断言（旧正则在那边必红）。
+{
+  const uid = `smoke_dellike_${Date.now()}`;
+  testUsers.push(uid);
+
+  // 先让长期记忆里真的有一条"喜欢辣"（factsFromMessage 只记带长期副词的说法）
+  await ask('我平时都喜欢吃辣味', { userId: uid });
+
+  const del = await ask('忘掉我喜欢辣味', { userId: uid });
+  expect(
+    '「忘掉我喜欢辣味」→ memory_action=deleted',
+    del.status === 200 && del.data.memory_action === 'deleted',
+    `${del.data.memory_action} / ${del.data.reply}`,
+  );
+
+  // 删完再查：这条偏好确实没了（只看结构化快照，不拿 reply 做文本匹配）
+  const after = await ask('你记得我什么', { userId: uid });
+  const core = after.data.memory?.core_profile || [];
+  expect('删完再查 → 那条辣味偏好没了', !core.some((t) => /辣/.test(t)), JSON.stringify(core));
+}
+
+// ── 36. 「换一批」的气泡里不许出现商品明细（2026-11-03 修）──────────
+// 事故：追问两轮后用户烦了说「换一批」，气泡出现
+//   "要不你先说句「随便」，我就直接给你排上 1. 麻辣魔芋爽｜29.9元…"
+// ——模型自己写了一份清单，`composeRecommendReply` 又把本地那份拼上去，成了缝合怪。
+// 修法：明细只在 `recommendations`（卡片）里；气泡只留过渡语 + 风险提示 + 话口。
+// 注意：这条是端到端冒烟，模型不吐清单时它天然通过；
+// 真正有牙的是 reco-guard【文案】那组（把事故现场那句话原样喂进 composeRecommendReply）。
+{
+  const uid = `smoke_nolist_${Date.now()}`;
+  testUsers.push(uid);
+  const h = [];
+
+  // 第一轮：什么都没说清 → 追问
+  const t1 = await ask('有什么好吃的', { userId: uid, history: h });
+  h.push(
+    { role: 'user', content: '有什么好吃的' },
+    { role: 'assistant', content: t1.data.reply || '' },
+  );
+
+  // 第二轮：顺着追问点头 → 出卡片
+  const t2 = await ask('随便吧', {
+    userId: uid,
+    history: h,
+    inRecommendContext: true,
+  });
+  h.push({ role: 'user', content: '随便吧' }, { role: 'assistant', content: t2.data.reply || '' });
+
+  // 第三轮：烦躁地「换一批」
+  const t3 = await ask('换一批', {
+    userId: uid,
+    history: h,
+    inRecommendContext: true,
+    lastPicks: names(t2),
+  });
+  const reply = t3.data.reply || '';
+
+  expect(
+    '「换一批」→ 气泡里没有「1. 」这类编号明细',
+    t3.status === 200 && !/^\s*\d+\s*[.、]/m.test(reply),
+    `cards=${names(t3).join('/')} | ${reply.replace(/\n/g, ' ').slice(0, 60)}`,
+  );
+  expect(
+    '「换一批」→ 气泡里没有价格',
+    !/\d+(\.\d+)?\s*元|¥\s*\d/.test(reply),
+    reply.replace(/\n/g, ' ').slice(0, 60),
+  );
+  expect(
+    '「换一批」→ 气泡里没有「你先说句随便」这类内部引导语',
+    !/说句|说了?随便|我就直接|给你排上/.test(reply),
+    reply.replace(/\n/g, ' ').slice(0, 60),
   );
 }
 
