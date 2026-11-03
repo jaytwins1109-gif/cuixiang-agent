@@ -699,18 +699,11 @@ export async function runLocalBrain(input: {
  * 正常路径下前端 `ensureUserId()` 会生成并持久化 UUID，走不到 guest 这个分支；
  * 它只兜住隐私模式等写不了 localStorage 的情况。
  */
-/** 原型链上的保留字：字符白名单拦不住它们（纯字母），但取的时候会拿到函数而不是数组 */
-const RESERVED_USER_ID =
-  /^(proto|constructor|prototype|__proto__|tostring|valueof|hasownproperty|isprototypeof)$/i;
-
-export function normalizeUserId(raw?: unknown): string {
-  const cleaned = String(raw ?? '')
-    .trim()
-    .replace(/[^a-zA-Z0-9_-]/g, '');
-  // 撞保留字的（比如前端被塞了个 constructor）也发一次性 id，不给它落盘的机会
-  const safe = cleaned && !RESERVED_USER_ID.test(cleaned) ? cleaned : '';
-  return safe || `guest_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
+/**
+ * 标识清洗的实现搬到了 `lib/auth/user-id.ts`（V2.0 起鉴权层也要用，而 handlers
+ * 会把整条 LLM 链路拖进 auth 路由）。这里只做 re-export，调用方不用改。
+ */
+export { normalizeUserId } from '@/lib/auth/user-id';
 
 // ─── 长期记忆 ────────────────────────────────────
 // 记忆意图的规则表达式见 lib/rules/patterns.ts。

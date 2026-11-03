@@ -18,7 +18,7 @@
 // 链路日志见 lib/chat/trace.ts：与 /api/ai 同一套 TraceID 打点，
 // 流式只是多了一条 [Local]「明确要货不上屏 delta」。
 
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { streamBrain } from '@/lib/llm/brain-stream';
 import {
   allowRecommend,
@@ -40,6 +40,9 @@ import { INTRODUCE_PATTERN, LEAD_IN_REPLY_PATTERN } from '@/lib/rules/patterns';
 import { findLocalSnack } from '@/lib/llm/orchestrator';
 import { composeRecommendReply, sanitizeTransition } from '@/lib/llm/reply-composer';
 import { recallMemory, renderMemoryForPrompt } from '@/lib/memory/store';
+import { GUEST_COOKIE, GUEST_MAX_AGE, cookieString } from '@/lib/auth/jwt';
+import { resolveIdentity } from '@/lib/auth/identity';
+import { checkRateLimit } from '@/lib/auth/rate-limit';
 import {
   newTraceId,
   traceRequest,
@@ -50,7 +53,6 @@ import {
   runWithTrace,
 } from '@/lib/chat/trace';
 import {
-  normalizeUserId,
   handleMemoryIntent,
   handlePendingConfirm,
   handleInsistAvoid,
@@ -89,6 +91,26 @@ export async function POST(req: NextRequest) {
 async function buildStreamResponse(req: NextRequest, traceId: string) {
   const encoder = new TextEncoder();
 
+  // 请求体与身份必须在建流之前解析完：
+  // 响应头（含 Set-Cookie 的游客票据）只能在这个函数返回 Response 时一次性给全，
+  // 等进了 start() 再算就晚了——头已经发出去了。
+  const body = (await req.json().catch(() => null)) as StreamBody | null;
+  if (!body?.message || typeof body.message !== 'string' || !body.message.trim()) {
+    // 与 /api/ai 对齐：前端本来就判断 400 并提示「说点什么呀」
+    return NextResponse.json({ error: '说点什么呀' }, { status: 400 });
+  }
+
+  const identity = await resolveIdentity(req, body.userId || body.userProfile?.id);
+  const userId = identity.userId;
+
+  const limited = checkRateLimit(userId);
+  if (!limited.ok) {
+    return NextResponse.json(
+      { error: '慢点，一口气说太多了，缓一下再聊', retry_after: limited.retryAfter },
+      { status: 429 },
+    );
+  }
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
@@ -122,18 +144,11 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
       };
 
       try {
-        const body = (await req.json()) as StreamBody;
-        if (!body?.message || typeof body.message !== 'string' || !body.message.trim()) {
-          send('error', { message: '说点什么呀' });
-          finish();
-          return;
-        }
-
-        const userId = normalizeUserId(body.userId || body.userProfile?.id);
         traceRequest(traceId, {
           message: body.message,
           entry: '/api/ai/stream',
           userId,
+          identity: identity.source,
         });
         const memory = await recallMemory(userId);
         const messages: ChatMessage[] = [
@@ -416,13 +431,17 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      // 关掉 Nginx 一类反代的缓冲，否则 SSE 会被攒成一大块再吐，流式就白做了
-      'X-Accel-Buffering': 'no',
-    },
-  });
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    // 关掉 Nginx 一类反代的缓冲，否则 SSE 会被攒成一大块再吐，流式就白做了
+    'X-Accel-Buffering': 'no',
+  };
+  // 游客票据：必须在响应头一次性带出去，等流开始就改不了头了
+  if (identity.guestTicket) {
+    headers['Set-Cookie'] = cookieString(GUEST_COOKIE, identity.guestTicket, GUEST_MAX_AGE);
+  }
+
+  return new Response(stream, { headers });
 }

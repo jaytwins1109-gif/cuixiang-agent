@@ -22,6 +22,9 @@ import {
 import { findLocalSnack } from '@/lib/llm/orchestrator';
 import { composeRecommendReply, sanitizeTransition } from '@/lib/llm/reply-composer';
 import { recallMemory, renderMemoryForPrompt } from '@/lib/memory/store';
+import { GUEST_COOKIE, GUEST_MAX_AGE, cookieString } from '@/lib/auth/jwt';
+import { resolveIdentity } from '@/lib/auth/identity';
+import { checkRateLimit } from '@/lib/auth/rate-limit';
 import {
   newTraceId,
   traceRequest,
@@ -32,7 +35,6 @@ import {
   runWithTrace,
 } from '@/lib/chat/trace';
 import {
-  normalizeUserId,
   handleMemoryIntent,
   handlePendingConfirm,
   handleInsistAvoid,
@@ -73,11 +75,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '说点什么呀' }, { status: 400 });
     }
 
-    const userId = normalizeUserId(body.userId || body.userProfile?.id);
+    // 身份：登录态 cookie 优先，其次 x-guest-id 头，最后兼容 body.userId。
+    // 顺序与判定逻辑只在 lib/auth/identity.ts 一处，流式入口共用同一份。
+    const identity = await resolveIdentity(req, body.userId || body.userProfile?.id);
+    const userId = identity.userId;
+
+    // 限流：按 userId 计（不按 IP，宿舍/公司共用一个出口，按 IP 会误伤旁人）
+    const limited = checkRateLimit(userId);
+    if (!limited.ok) {
+      const res = NextResponse.json(
+        { error: '慢点，一口气说太多了，缓一下再聊', retry_after: limited.retryAfter },
+        { status: 429 },
+      );
+      if (identity.guestTicket) {
+        res.headers.append(
+          'Set-Cookie',
+          cookieString(GUEST_COOKIE, identity.guestTicket, GUEST_MAX_AGE),
+        );
+      }
+      return res;
+    }
+
     traceRequest(traceId, {
       message: body.message,
       entry: '/api/ai',
       userId,
+      identity: identity.source,
     });
 
     // 整轮包进 trace 上下文：lib/llm 深处的报错（provider 挂了、超时重试、降级）
@@ -91,7 +114,15 @@ export async function POST(req: NextRequest) {
       awaiting: !!payload.awaiting_prefs,
     });
     // trace_id 回给调用方：界面上看到的那一句，能直接对上日志里那几行
-    return NextResponse.json({ ...payload, trace_id: traceId });
+    const res = NextResponse.json({ ...payload, trace_id: traceId });
+    // 游客第一次来（或换了 id）时补发签名票据：/api/auth/upgrade 要靠它证明"这个 id 是我"
+    if (identity.guestTicket) {
+      res.headers.append(
+        'Set-Cookie',
+        cookieString(GUEST_COOKIE, identity.guestTicket, GUEST_MAX_AGE),
+      );
+    }
+    return res;
   } catch (err: any) {
     // 走 traceError：stderr 里也要有 TraceID，重启后翻 dev.err.log 才对得上人
     traceError('AI Route Error', err, traceId);

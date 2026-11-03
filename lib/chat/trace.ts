@@ -101,12 +101,19 @@ function emit(traceId: string, stage: string, detail: string): void {
 /** ① 收到用户请求：整轮日志的起点，TraceID 在这里第一次出现 */
 export function traceRequest(
   traceId: string,
-  input: { message: string; entry: string; userId?: string },
+  input: {
+    message: string;
+    entry: string;
+    userId?: string;
+    /** V2.0：这轮身份从哪来（token / guest-header / body / new-guest），排查串号必备 */
+    identity?: string;
+  },
 ): void {
   emit(
     traceId,
     'Request',
-    `收到请求，用户输入: ${oneLine(input.message, 120)} | 入口=${input.entry} userId=${input.userId || '-'}`,
+    `收到请求，用户输入: ${oneLine(input.message, 120)} | 入口=${input.entry} userId=${input.userId || '-'}` +
+      (input.identity ? ` 身份=${input.identity}` : ''),
   );
 }
 
