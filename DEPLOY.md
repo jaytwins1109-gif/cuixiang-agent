@@ -72,6 +72,60 @@ node -e "console.log(require('crypto').createHash('sha256').update('你的口令
 
 ---
 
+## 2.5 平台托管路线（Render / Railway，本地不装 Docker）
+
+`docker-compose.yml` 里的迁库编排（`depends_on: service_completed_successfully`）**只有 compose 会读**。
+Render / Railway 这类平台拿到仓库后直接 `docker build` 整个 `Dockerfile`（默认构建到最后一个 stage，
+也就是 `runner`——顺序已经为此调整过，别再把它挪回去），然后跑容器，**没有任何迁库步骤**。
+
+按平台分两条走法：
+
+### 走法 A：Render 原生环境（推荐，绕开 Dockerfile 迁库难题）
+
+Render 的 Native Environment（不是 Docker Runtime）自带 **Pre-Deploy Command**，且在 build 之后、
+实例启动前执行——正好放迁库。控制台配置：
+
+| 配置项 | 值 |
+|---|---|
+| Environment | `Node` |
+| Build Command | `npm ci && npx prisma generate && npm run build` |
+| Pre-Deploy Command | `npx prisma migrate deploy` |
+| Start Command | `npm start` |
+| Environment → `NODE_VERSION` | `20` |
+| Environment → `TZ` | `Asia/Shanghai`（记忆里的"今天/昨天"按北京时间算） |
+| Environment → `DATABASE_URL` | `file:/var/data/cuixiang.db`（**绝对路径**，指向挂载盘） |
+| Environment → `AUTH_SECRET` / `DEEPSEEK_API_KEY` 等 | 同 §2 表格 |
+| Disk | 任意大小，挂载路径 `/var/data`（SQLite 就写在这里；**免费实例没有 Disk，必须付费档**） |
+| Health Check Path | `/api/health` |
+
+验证：部署完成后 `curl https://<你的域名>/api/health`，应返回 `{"status":"ok","db":"connected"}`。
+
+### 走法 B：Railway / Fly（Dockerfile 路线）
+
+这类平台对多阶段 `target` 支持不一，稳妥做法是**把迁库并进启动流程**：
+
+1. Volume：Railway 挂到 `/app/data`，Fly 挂到 `/app/data`
+2. `DATABASE_URL=file:/app/data/cuixiang.db`（**绝对路径**；相对路径依赖 schema 的编译期位置，云盘路径一变就失联）
+3. 迁库三选一：
+   - 平台支持"release command / deploy 前任务"且能指定 `target: migrator` → 直接用；
+   - 平台支持在启动命令前插一步 shell（如 Railway 的 start command）→ 临时换 `Dockerfile` 里加 prisma CLI 的镜像；
+   - 都不支持 → 在云盘初始化时用**本地一次性容器**连云盘？SQLite 做不到远程迁库——
+     这时最省事的做法是给 `runner` 镜像加回 prisma CLI（把 `Dockerfile` runner 阶段注释里预留的两行
+     `COPY --from=migrator` 解开），再让启动命令带 `npx prisma migrate deploy && node server.js`
+     （`migrate deploy` 幂等，每次启动多花几秒，换来永不手滑漏迁库）。
+
+> **SQLite + 多实例 = 必炸**：无论哪个平台，SQLite 只能单实例。要横向扩容，先把库换成 Postgres
+> （schema 基本兼容，改 `datasource` provider + 迁移历史重建）。
+
+### 云平台通用提醒
+
+- `TZ=Asia/Shanghai` 一定要配，平台默认 UTC，推荐理由里的"今天刚上的"会差 8 小时；
+- `RATE_LIMIT_MAX` 同样**不要配**；
+- HTTPS 平台自动配好，`NODE_ENV=production` 下 Secure Cookie 生效，不用担心 §4 的 cookie 丢失问题；
+- 备份：平台托管拿不到宿主机 shell，用平台自带的盘快照；`npm run db:backup` 只适用于 VPS 路线。
+
+---
+
 ## 3. 启动（迁库已自动编排）
 
 ```bash

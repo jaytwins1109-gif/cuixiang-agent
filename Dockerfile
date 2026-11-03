@@ -1,16 +1,21 @@
 # syntax=docker/dockerfile:1
 #
-# 四个阶段：
+# 四个阶段（顺序有讲究，见下方 ⚠）：
 #   deps     —— 装依赖 + prisma generate（只有这一层碰网络）
 #   builder  —— next build，产出 .next/standalone
-#   runner   —— 生产镜像（app），只带 standalone 产物与 Prisma 引擎
 #   migrator —— 一次性容器，跑 prisma migrate deploy
+#   runner   —— 生产镜像（app），只带 standalone 产物与 Prisma 引擎
+#
+# ⚠ migrator 必须排在 runner **前面**：Render/Railway 这类平台托管构建
+#   不会像 docker-compose 那样指定 target，它们默认构建到文件的**最后一个阶段**。
+#   若 runner 在前，云端起的就是一个"跑完迁库就退出"的一次性容器，无限重启循环。
+#   compose 的两个服务都显式写了 `target:`，不受顺序影响。
 #
 # 为什么 migrate 不塞进 app 镜像：Prisma CLI 连带引擎约 20MB，且发布时只跑一次。
 # app 镜像里**故意没有** prisma CLI —— 想在业务容器里改库结构，得先过
-# `docker compose run --rm migrate` 这一关。
+# `docker compose run --rm migrate` 这一关（Render 原生环境的替代走法见 DEPLOY.md §2.5）。
 #
-# SQLite 落在 /app/data，由 compose 挂卷持久化；容器重建不丢数据。
+# SQLite 落在 /app/data，由挂卷/持久盘持久化；容器重建不丢数据。
 
 ###############################################################################
 # 1. deps
@@ -48,7 +53,25 @@ ENV DATABASE_URL="file:../data/build-placeholder.db"
 RUN npm run build
 
 ###############################################################################
-# 3. runner（生产镜像）
+# 3. migrator（一次性）
+###############################################################################
+FROM node:20-alpine AS migrator
+WORKDIR /app
+
+RUN apk add --no-cache openssl
+
+# 迁库要完整 CLI 与依赖树，这里不裁剪
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json ./
+COPY prisma ./prisma
+
+ENV NODE_ENV=production
+
+# compose 里会覆盖成带 chown 的 shell 命令；直接 docker run 也能用
+ENTRYPOINT ["npx", "prisma", "migrate", "deploy"]
+
+###############################################################################
+# 4. runner（生产镜像）—— 故意放在最后：平台托管默认构建到最后一个阶段
 ###############################################################################
 FROM node:20-alpine AS runner
 WORKDIR /app
@@ -73,32 +96,22 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
+# ── Render 等不支持多阶段 target 的平台专用 ─────────────────────────────
+# 平台的 Pre-Deploy Command 在本镜像里跑 `npx prisma migrate deploy`，
+# 而 standalone 的裁剪 node_modules 没有 prisma CLI。走 compose/原生环境路线的
+# 保持下面两行注释不动；走 Dockerfile 平台托管且需要镜像内迁库的，解开它们
+# （代价：镜像 +约 40MB，换来 `prisma migrate deploy` 幂等地随启动跑）：
+# COPY --from=migrator --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
+# COPY --from=migrator --chown=nextjs:nodejs /app/node_modules/@prisma/engines ./node_modules/@prisma/engines
+
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
     && mkdir -p /app/data \
     && chown -R nextjs:nodejs /app/data
 
-# 保持 root 启动：bind mount 下来的 ./data 属主属于宿主机，
+# 保持 root 启动：bind mount 下来的数据目录属主属于宿主机/平台盘，
 # 只有 root 才能 chown 回 nextjs，随后 entrypoint 里立刻降权
 USER root
 EXPOSE 3000
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-
-###############################################################################
-# 4. migrator（一次性）
-###############################################################################
-FROM node:20-alpine AS migrator
-WORKDIR /app
-
-RUN apk add --no-cache openssl
-
-# 迁库要完整 CLI 与依赖树，这里不裁剪
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json ./
-COPY prisma ./prisma
-
-ENV NODE_ENV=production
-
-# compose 里会覆盖成带 chown 的 shell 命令；直接 docker run 也能用
-ENTRYPOINT ["npx", "prisma", "migrate", "deploy"]
