@@ -3,13 +3,13 @@
  * 用法：先起 dev server（npm run dev），再 npm run smoke
  * 原则：只断言确定性行为（本地规则兜底的部分），模型随机性不做强断言。
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { PrismaClient } from '@prisma/client';
 
 const BASE = process.env.SMOKE_URL || 'http://localhost:3000/api/ai';
-/** 项目根：拉起子进程跑 .ts 守卫脚本时要用它当 cwd（store.ts 按 cwd 找 data/memory.json） */
+/** 项目根：拉起子进程跑 .ts 守卫脚本时要用它当 cwd（守卫脚本按 cwd 找 .env 与 data/） */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SPICY = [
   '辣味海苔脆',
@@ -24,37 +24,66 @@ const SPICY = [
   '辣条大礼包',
   '麻辣魔芋爽',
 ];
-const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
+/**
+ * 直接连库：V2.0 起长期记忆在 SQLite 里，用例要"造种子 / 断言落库 / 收尾清理"都得走 Prisma。
+ * 这条连接只服务测试，和 dev server 那条各自独立（SQLite 允许多连接，写操作串行）。
+ */
+const prisma = new PrismaClient();
 
 /**
  * 本轮用例造出来的测试用户。
  * 收尾时物理删掉：业务的删除是软删除（要保留痕迹便于追溯，这是设计如此），
- * 但测试数据没追溯价值，留着会让 memory.json 每跑一次涨一截。
+ * 但测试数据没追溯价值，留着会让库每跑一次涨一截。
  */
 const testUsers = [];
 
+/** 造种子：先确保用户行存在，再把这个用户的记忆清空重写 */
+async function seedMemories(uid, records) {
+  await prisma.user.upsert({
+    where: { id: uid },
+    create: { id: uid, isGuest: true },
+    update: {},
+  });
+  await prisma.memory.deleteMany({ where: { userId: uid } });
+  for (const r of records) {
+    await prisma.memory.create({
+      data: {
+        id: r.id,
+        userId: uid,
+        layer: r.layer,
+        keyword: r.keyword,
+        content: r.content,
+        status: r.status || 'active',
+        context: r.context ?? null,
+        category: r.category ?? null,
+        polarity: r.polarity ?? null,
+        source: r.source ?? null,
+        createdAt: new Date(r.created_at || Date.now()),
+        updatedAt: new Date(r.updated_at || Date.now()),
+      },
+    });
+  }
+}
+
+/** 读这个用户的全部记忆行（断言用，含 deleted / superseded） */
+const readMemories = (uid) => prisma.memory.findMany({ where: { userId: uid } });
+
+/** 库里现有全部 userId（用来断言"某个脏 id 确实没落库"） */
+async function allUserIds() {
+  const rows = await prisma.user.findMany({ select: { id: true } });
+  return rows.map((r) => r.id);
+}
+
 /**
- * 按名字把用户从 memory.json 里抹掉。
- * 采用原子写（临时文件 + 改名），避免和服务端正在进行的写操作撞车写坏文件。
+ * 按 id 把测试用户整份删掉（User 删除会级联带走 Memory）。
+ * 没有 User 行的（比如只问了"你记得我什么"的隔离用例）本来就不在库里，
+ * 报数时把"删掉的"和"本来就没有的"分开说，免得被误读成漏清。
  */
-function pruneUsers(names) {
+async function pruneUsers(names) {
+  if (!names.length) return { removed: 0, missing: 0 };
   try {
-    const store = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
-    let removed = 0;
-    for (const uid of names) {
-      if (store[uid]) {
-        delete store[uid];
-        removed++;
-      }
-    }
-    if (removed) {
-      const tmp = `${MEMORY_FILE}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(store, null, 2), 'utf8');
-      fs.renameSync(tmp, MEMORY_FILE);
-    }
-    // 没落过记忆的用户（比如只问了"你记得我什么"的隔离用例）本来就不在文件里，
-    // 以前只报 removed/total 会被误读成"漏清了一个"，这里把两种数分开说清楚。
-    return { removed, missing: names.length - removed };
+    const hit = await prisma.user.deleteMany({ where: { id: { in: names } } });
+    return { removed: hit.count, missing: names.length - hit.count };
   } catch (e) {
     console.log(`清理测试用户失败（不影响用例结果）：${e.message}`);
     return { removed: 0, missing: names.length };
@@ -63,9 +92,13 @@ function pruneUsers(names) {
 
 // 单独跑: node scripts/smoke.mjs --only-prune —— 只清历史残留，不跑用例
 if (process.argv.includes('--only-prune')) {
-  const store = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
-  const stale = Object.keys(store).filter((k) => k.startsWith('smoke_'));
-  console.log(`历史 smoke 残留 ${stale.length} 个，清掉 ${pruneUsers(stale).removed} 个`);
+  const rows = await prisma.user.findMany({
+    where: { id: { startsWith: 'smoke_' } },
+    select: { id: true },
+  });
+  const stale = rows.map((r) => r.id);
+  console.log(`历史 smoke 残留 ${stale.length} 个，清掉 ${(await pruneUsers(stale)).removed} 个`);
+  await prisma.$disconnect();
   process.exit(0);
 }
 
@@ -82,7 +115,11 @@ async function ask(
 ) {
   const res = await fetch(BASE, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // V2.0 起游客身份走请求头；body.userId 仍带上（兼容期两条并存，服务端以头为准）
+      ...(userId ? { 'x-guest-id': userId } : {}),
+    },
     body: JSON.stringify({
       message,
       history,
@@ -556,23 +593,14 @@ expect(
   );
 }
 
-// ── 收尾：抹掉本轮造的测试用户 ────────────────────
-// Pending closure: seed a pending record straight into memory.json,
+// ── 13. 待确认闭环：直接往库里种一条 pending，再来一句答复 ──────
+// Pending closure: seed a pending record straight into the DB,
 // then answer it. Deterministic -- no dependence on how the model phrases things.
 {
   const uid = `smoke_pending_${Date.now()}`;
   testUsers.push(uid);
   const now = new Date().toISOString();
-  let store = {};
-  try {
-    store = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
-  } catch {
-    store = {};
-  }
-  const seed = (list) => {
-    store[uid] = list;
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify(store, null, 2), 'utf8');
-  };
+  const seed = (list) => seedMemories(uid, list);
 
   const oldRec = {
     id: `m_old_${Date.now()}`,
@@ -599,12 +627,12 @@ expect(
   };
 
   // Deny path
-  seed([{ ...oldRec }, { ...pendingRec }]);
+  await seed([{ ...oldRec }, { ...pendingRec }]);
   const denied = await ask('不是', { userId: uid });
   expect('否认待确认 → 本地直接办结', denied.data.memory_action === 'resolved', denied.data.reply);
 
   // Confirm path
-  seed([{ ...oldRec }, { ...pendingRec, id: `m_pending2_${Date.now()}` }]);
+  await seed([{ ...oldRec }, { ...pendingRec, id: `m_pending2_${Date.now()}` }]);
   const confirmed = await ask('对', { userId: uid });
   expect(
     '确认待确认 → 本地直接办结',
@@ -626,35 +654,31 @@ expect(
 // 被门槛 `!out.length` 挡死（同轮抽出的口味事实把 out 填非空了）——
 // pending 不生成、提问不问，"喜欢吃辣的"还和忌口并存写进了记忆。
 // 修复后冲突事实排到 facts[0]，decideMemoryAction 挂 pending 等本人表态。
-// 断言只看 memory.json 的结构化记录 + memory_action 字段，
+// 断言只看库里的结构化记录 + memory_action 字段，
 // 不拿 reply 做文本匹配（有的空状态文案里就含「我不吃辣」字样）。
 {
-  const readStore = () => {
-    try {
-      return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
-    } catch {
-      return {};
-    }
-  };
-  const recs = (uid) => readStore()[uid] || [];
-  const activeCore = (uid) =>
-    recs(uid).filter((r) => r.layer === 'core_profile' && r.status === 'active');
+  const recs = (uid) => readMemories(uid);
+  const activeCore = async (uid) =>
+    (await recs(uid)).filter((r) => r.layer === 'core_profile' && r.status === 'active');
+  const brief = async (uid) =>
+    JSON.stringify((await recs(uid)).map((r) => [r.layer, r.status, r.content]));
 
   // A. 改口撞忌口 → 挂 pending，且确认前旧忌口原样保留
   const uidA = `smoke_clash_${Date.now()}`;
   testUsers.push(uidA);
   await ask('我不吃辣', { userId: uidA });
   await ask('我平时都喜欢吃辣的', { userId: uidA });
-  const pendingA = recs(uidA).filter((r) => r.status === 'pending');
+  const pendingA = (await recs(uidA)).filter((r) => r.status === 'pending');
   expect(
     '改口撞忌口 → 挂 pending 待确认',
     pendingA.length === 1 && /辣/.test(pendingA[0].content || ''),
-    JSON.stringify(recs(uidA).map((r) => [r.layer, r.status, r.content])),
+    await brief(uidA),
   );
+  const coreA = await activeCore(uidA);
   expect(
     '冲突没确认前 → 旧忌口「不吃辣」原样保留',
-    activeCore(uidA).some((r) => /不吃辣/.test(r.content || '')),
-    JSON.stringify(activeCore(uidA).map((r) => r.content)),
+    coreA.some((r) => /不吃辣/.test(r.content || '')),
+    JSON.stringify(coreA.map((r) => r.content)),
   );
 
   // B. 重申同一个忌口 → 不算改口，不挂 pending（restatedAvoid 门槛）
@@ -664,8 +688,8 @@ expect(
   await ask('我说了我不吃辣', { userId: uidB });
   expect(
     '重申忌口 → 不挂 pending',
-    !recs(uidB).some((r) => r.status === 'pending'),
-    JSON.stringify(recs(uidB).map((r) => [r.layer, r.status, r.content])),
+    !(await recs(uidB)).some((r) => r.status === 'pending'),
+    await brief(uidB),
   );
 
   // C. 确认改口 → pending 办结、旧忌口作废、新口味转正
@@ -675,10 +699,11 @@ expect(
     confirmed.data.memory_action === 'resolved',
     confirmed.data.reply,
   );
+  const coreAfter = await activeCore(uidA);
   expect(
     '确认后 → 生效的 core_profile 恰好一条且是喜欢辣',
-    activeCore(uidA).length === 1 && /辣/.test(activeCore(uidA)[0].content || ''),
-    JSON.stringify(recs(uidA).map((r) => [r.layer, r.status, r.content])),
+    coreAfter.length === 1 && /辣/.test(coreAfter[0].content || ''),
+    await brief(uidA),
   );
 }
 
@@ -725,7 +750,7 @@ expect(
 
 // ── 16. userId 清洗：路径穿越 / 原型链保留字都要挡住 ──
 {
-  const keys = () => Object.keys(JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8')));
+  const keys = () => allUserIds();
 
   // 路径穿越：斜杠和点被剥掉，清洗后落到一个普通 key 上，记忆能正常读写
   const raw = 'u_bad/id/../../etc/passwd';
@@ -737,7 +762,7 @@ expect(
   const prof = q.data.memory?.core_profile || [];
   expect(
     'userId 清洗：路径穿越字符被剥掉，记忆照常读写',
-    q.status === 200 && prof.length === 1 && keys().includes(cleaned),
+    q.status === 200 && prof.length === 1 && (await keys()).includes(cleaned),
     JSON.stringify(prof),
   );
 
@@ -746,7 +771,7 @@ expect(
   const r2 = await ask('我不吃辣', { userId: 'constructor' });
   expect(
     'constructor 当 userId → 不落盘且不崩',
-    r2.status === 200 && !keys().includes('constructor'),
+    r2.status === 200 && !(await keys()).includes('constructor'),
     `status=${r2.status}`,
   );
 }
@@ -1450,7 +1475,7 @@ function runGuard(file, args = []) {
   );
 }
 
-const pruned = pruneUsers(testUsers);
+const pruned = await pruneUsers(testUsers);
 
 // ── 汇总 ─────────────────────────────────────────
 const failed = results.filter((x) => !x).length;
@@ -1460,4 +1485,5 @@ console.log(
     ? `清理测试用户 ${pruned.removed} 个（${pruned.missing} 个没写过记忆，无需清理）`
     : `清理测试用户 ${pruned.removed} 个`,
 );
+await prisma.$disconnect();
 process.exit(failed ? 1 : 0);

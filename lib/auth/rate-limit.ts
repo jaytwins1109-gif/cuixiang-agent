@@ -13,8 +13,13 @@
 //   副作用是换一个 id 就能绕过——但 id 要换就得先清 cookie，恶意成本已经上去了。
 
 const WINDOW_MS = 60 * 1000;
-/** 一分钟 10 次：正常聊天一分钟说不了 10 句，刷屏脚本一秒就撞墙 */
-const MAX_HITS = 10;
+/**
+ * 一分钟 10 次：正常聊天一分钟说不了 10 句，刷屏脚本一秒就撞墙。
+ *
+ * 允许用 `RATE_LIMIT_MAX` 覆盖，只为本地回归：smoke 里同一个测试用户一分钟要打十几句，
+ * 不放宽会让一大批用例平白撞 429。**生产别配这个变量**，默认值就是线上口径。
+ */
+const MAX_HITS = Math.max(1, Number(process.env.RATE_LIMIT_MAX) || 10);
 
 interface Bucket {
   windowStart: number;
