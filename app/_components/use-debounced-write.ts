@@ -33,6 +33,29 @@ export function useDebouncedWrite(key: string, value: unknown, ready = true, del
     }
   }, [key]);
 
+  /**
+   * 立刻写入指定值并取消挂起的定时器。
+   *
+   * 给"缓存作废"这种场合用：游客升级成正式账号后，本地那份 profile 是升级前
+   * 攒的临时缓存，必须马上用空对象盖掉。只 `setProfile({})` 是不够的——
+   * 上一个定时器可能还握着旧值，300ms 后照样把旧缓存写回去。
+   */
+  const save = useCallback(
+    (next: unknown) => {
+      latest.current = next;
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        /* 同上 */
+      }
+    },
+    [key],
+  );
+
   // 每次变化先更新快照，真正的写盘交给下面的定时器
   useEffect(() => {
     latest.current = value;
@@ -66,4 +89,6 @@ export function useDebouncedWrite(key: string, value: unknown, ready = true, del
       flush();
     };
   }, [ready, flush]);
+
+  return { flush, save };
 }

@@ -12,18 +12,32 @@
 
 | 项 | 状态 |
 |---|---|
-| 最后更新 | 2026-11-03（会话：V1.0 封版 · git / 后台签名 / 记忆备份 + 删除正则 / 气泡明细 → 两条 Bug 复核 → **P1+P2+P3 收口 → 生产构建 + 提交**） |
-| 当前在做 | **无进行中任务**。P0 三件、两个 Bug、P1（lint+单测+format 基线）、P2（`page.tsx` 拆分 + 防抖写盘）、P3（根目录清理）全部完成并验过，已分两个 commit 提交（见 §2 首行） |
-| 最近回归 | `npm run verify` **69/69**、`npm run lint` **0 error 0 warning**、`format:check` **全绿**、`guard` **profile 全过 + reco 21/21**、`next build` **成功**（`✓ Compiled successfully`，7/7 静态页，`/` 首屏 114 kB）；`npm run smoke` **r1 130/130、r2 128/130、r3 130/130**（r2 两条失败都是模型随机会话态：§4 #12「无任何偏好仍追问」与「还是不想吃辣只出 2 张」，与 P1~P3 无关）；浏览器实测：首屏/推荐卡片/刷新读档全正常 |
+| 最后更新 | 2026-11-03（会话：V1.0 封版 → P1+P2+P3 收口 → **V2.0 数据库化 + 鉴权：第 0~5 步 + 数据迁移执行**） |
+| 当前在做 | **第 5 步（前端 `useAuth` + 注册/登录）代码写完并验过，待提交**。第 0~4 步已提交（见 §2 前 4 行）；V2.0 结束后 V1.0 的 P1/P2/P3 结论仍有效 |
+| 最近回归 | `npm run verify` **69/69**、`npm run lint` **0 error 0 warning**、`format:check` **全绿**、`guard` **profile 全过 + reco 21/21**、`next build` **成功**（`✓ Compiled successfully`，7/7 静态页，`/` 首屏 114 kB）；`npm run smoke` **r1 130/130、r2 128/130、r3 130/130**（r2 两条失败都是模型随机会话态：§4 #12「无任何偏好仍追问」与「还是不想吃辣只出 2 张」，与 P1~P3 无关）；浏览器实测：首屏/推荐卡片/刷新读档全正常；**V2.0 第 5 步**：`verify` 69/69、lint 0/0、format 全绿，Edge 实测「游客 → 注册 → 刷新保持登录 → 退出 → 再登录」全过（smoke 留到第 7 步全量跑） |
 | 阻塞 | 无 |
-| 下一步 | 待定。可选项：`page.tsx` 再拆（还剩 929 行主壳，要动流式/中止逻辑，风险 > 收益）、§4 #12 两条偶发用例根治（要给"模型当轮填的 category"加出处校验）、给 `eslint.config.mjs` 接 `eslint-config-next` 消掉 build 时那条 "Next.js plugin was not detected" 提示（需新装依赖，本轮刻意没做） |
+| 下一步 | **第 6 步**：`scripts/prune-memory.mjs` 还读 `data/memory.json`（已改名，跑不动）→ 改走 Prisma；新增 `scripts/backup-db.mjs`（SQLite 备份）；确认仓库里再无 JSON 写入路径。**第 7 步**：`系统prompt汇总.md` 同步 + `verify`/`guard`/`smoke` 全量回归 |
 | 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8）；`npm run build` 前必须先停 dev server（两者共用 `.next`） |
 
 ---
 
 ## 1. 正在做（Doing）
 
-**无进行中任务。** P1 / P2 / P3 已收口（见 §2 前三行），此前的七项修复与两个 Bug 也都验过（见 §2）。
+### V2.0 数据库化 + 鉴权（Prisma + SQLite）
+
+| 步 | 内容 | 状态 |
+|---|---|---|
+| 0 | 可行性闸门：装 `prisma`/`@prisma/client`/`bcryptjs`/`jose`、`prisma generate`、`migrate init`、读写往返自检 | ✅ 已提交 `ad869a9` |
+| 1 | `schema.prisma`（User/Memory，补 `category/polarity/source/createdAt`）、`lib/db.ts` 单例 + `ensureDatabaseUrl()`、`scripts/migrate-memory-json.mjs` | ✅ 同上 |
+| 2 | `lib/memory/store.ts` 切 Prisma：写路径包事务，分层/软删除/待确认语义一行未动 | ✅ 已提交 `236240b` |
+| 3 | `lib/auth/{jwt,user-id,rate-limit,identity}.ts` + `api/auth/{login,upgrade,me,logout}` + 两个 AI 入口接身份解析与限流 | ✅ 已提交 `0fa32b1` |
+| 4 | `scripts/smoke.mjs` 读写全换 Prisma + 统一 `x-guest-id` 头（顺带补两处漏 `await`） | ✅ 已提交 `a597ecc` |
+| 5 | 前端：`use-auth.ts` / `auth-dialog.tsx` / `page.tsx` 接入 / 抽屉账号区 / 升级后清 profile 缓存 / 429 话术 | ✅ 已验，待提交 |
+| — | 数据迁移已执行：**45 用户 / 51 条**入库，原文件改名 `data/memory.json.migrated-20261103` | ✅ |
+| 6 | `prune-memory.mjs` 改走 Prisma + 新增 `backup-db.mjs` | ⬜ 下一步 |
+| 7 | `系统prompt汇总.md` 同步 + `verify`/`guard`/`smoke` 全量回归 | ⬜ |
+
+**V1.0 的 P1/P2/P3 已收口**（见 §2），此前的七项修复与两个 Bug 也都验过（见 §2）。
 
 | # | 任务 | 做法 | 状态 |
 |---|---|---|---|
@@ -64,6 +78,11 @@
 
 | 日期 | 任务 | 结果 | 关键落点 |
 |---|---|---|---|
+| 2026-11-03 | **V2.0 第 5 步：前端 `useAuth` + 注册/登录** | ① `use-auth.ts`：以 `/api/auth/me` 为唯一真源（**不**把账号态写进 localStorage），`userId` 永有值（未登录=本地 `u_xxx`，升级不换 id 所以记忆天然继承）；`upgrade / login / logout / refresh` 四个动作 ② `auth-dialog.tsx`：注册/登录同一组件双模式，前端先校验邮箱格式与密码长度 ③ `page.tsx`：抽屉顶部「账号」区、`AuthDialog` 挂载、三处 fetch 统一 `requestHeaders()`、流式 429 用服务端原话（不再落「刚卡了一下」）④ `use-debounced-write` 新增 `save()`：升级成功后**立刻**用 `{}` 盖掉 profile 缓存（只 `setProfile({})` 会被 pending 定时器写回旧值）⑤ 升级/登录后 `refresh()` 拿服务端快照覆盖本地 | ✅ `verify` 69/69、lint 0/0、format 全绿；Edge 实测：游客注册（新邮箱）→ 抽屉显示邮箱 → 刷新仍登录 → 退出回游客态 → 再登录成功；`cx_profile_v1` 升级后为 `{}`；两个测试账号已物理清理 | `app/_components/{use-auth,auth-dialog,use-debounced-write}` / `app/page.tsx` / `app/api/auth/{me,upgrade}/route.ts` |
+| 2026-11-03 | **V2.0 第 5 步联调修了三个断点**（都是真机上点出来的） | ① 新访客点「注册」必 403：`cx_guest` 票据只在发过消息后才有 → `/api/auth/me` 认 `x-guest-id`，票据缺失时**补发一张** ② 从没聊过的人注册被 404「先聊一句再来注册」（库里无 User 行）→ 改 `upsert` 直接建行（票据已证明 id 归属，且无历史数据可继承）③ 账号被删后旧 `cx_token` 仍被当登录态（还能被 `writeMemory` upsert 复活）→ `me` 发现「票有效但库里没人」就清票，浏览器自愈 | ✅ 三条都在 Edge 里复现→修复→复测；直连 `me` 确认下发 `cx_guest=...; HttpOnly; SameSite=Lax` | `app/api/auth/me/route.ts` / `app/api/auth/upgrade/route.ts` |
+| 2026-11-03 | **V2.0 第 4 步：smoke 适配数据库** | `seedMemories/readMemories/allUserIds/pruneUsers` 全改 async Prisma，`--only-prune` 按 `smoke_` 前缀物理清理；`ask()` 统一带 `x-guest-id`；第 13 节两处 `seed()` 调用漏 `await`（请求跑在写库前） | ✅ 补 `await` 后 r4~r6 稳定；SSE 一条失败是 DeepSeek 402 余额不足，与改造无关 | `scripts/smoke.mjs` |
+| 2026-11-03 | **V2.0 第 3 步：鉴权体系** | `jwt.ts`（jose HS256 签 `cx_token`/`cx_guest`，校验 `typ` 防串用）、`user-id.ts`（`normalizeUserId` 搬出 + 新增 `strictUserId`）、`rate-limit.ts`（滑动窗口，默认 10 次/60 秒按 userId 计）、`identity.ts`（token > x-guest-id > body.userId > 新发 guest）；四路由：login（错密码与不存在统一话术防枚举）、upgrade（必须验 `cx_guest` 且与 guestId 一致，防账号被绑走）、me（游客返空快照而非 401）、logout | ✅ 19 条 HTTP 断言全过 | `lib/auth/*` / `app/api/auth/*` / 两个 AI 入口 |
+| 2026-11-03 | **V2.0 第 0~2 步：Prisma + 迁移 + store 切换** | ① DB 落 `data/cuixiang.db`；`layer/status/polarity` 用 String（SQLite 无 enum，类型安全由 TS 联合类型守），不加 keyword+status 唯一键（软删除要留痕），加 `@@index([userId,layer,status])` / `@@index([userId,updatedAt])` ② `store.ts` 移除 fs/原子写/MemoryMutex，写路径包 `prisma.$transaction`，200 条上限按 `updatedAt` 删旧 ③ 迁移脚本试运行 45 用户/51 条 | ✅ `store` 12 条语义断言通过；`--apply` 后库内 45/51，抽样核对 `category/polarity/source` 齐全，原文件改名留档 | `prisma/schema.prisma` / `prisma/migrations/*` / `lib/db.ts` / `lib/memory/store.ts` / `scripts/migrate-memory-json.mjs` |
 | 2026-11-03 | **生产构建 + 分两次提交** | ① `npx next build`：先停 dev server（两者共用 `.next`），cmd 前置清空 `CODEBUDDY_*` 身份变量 → `✓ Compiled successfully`，7/7 静态页，`/` 8.78 kB / 首屏 114 kB；唯一提示是 "Next.js plugin was not detected in your ESLint configuration"（没装 `eslint-config-next`，信息级，已记入 §3）② 提交前仓库没配 `user.name/email`（上一条 `3d44c09` 用的是 `Administrator <administrator@localhost>`），按「不改 git config」的规矩用 `-c user.name=… -c user.email=…` 临时带入同一身份 ③ 两个 commit：**`ae6a4ce`** chore（工具链 + 全仓格式化 + 死引用清理）、**`f6268c9`** refactor（`page.tsx` 拆件 + 防抖写盘 + 根目录清理 + 文档同步） | ✅ `git status` 无输出（工作区干净），提交序列 `3d44c09 → ae6a4ce → f6268c9` | `.next` / `build.log` / git |
 | 2026-11-03 | **P1：lint / 单测 / verify 基线** | ① `eslint.config.mjs`（ESLint 9 flat，宽松优先：`no-explicit-any` 关、`no-unused-vars` 降 warn、风格类交 Prettier）② `vitest.config.ts` + `tests/` 3 个文件共 **69 条**（admin 票据 12 / profile-guard 35 / reco-guard 22），断言仍只在 `scripts/*-guard.ts` 写一份，`scripts/guard-types.ts` 的 `GuardResult` 给 CLI 与 vitest 共用 ③ `npm run verify` = `tsc --noEmit && vitest run` ④ 本次补齐：`.prettierrc` 改 `singleQuote: true`（对齐既有代码，避免全仓引号大改）、`.prettierignore` 排除 `*.md`（手写中文表格格式化只制造噪声），`format:check` 从 56 个文件不通过 → **全绿**；删掉搬走后残留的死引用、未用形参改 `_plan` / `_query` / `_reason` 并注明为何保留，`npm run lint` 35 警告 → **0** | ✅ `verify` 69/69；lint 0 error 0 warning；format:check 全绿；全都不需要 dev server | `eslint.config.mjs` / `vitest.config.ts` / `.prettierrc` / `.prettierignore` / `tests/*` / `scripts/guard-types.ts` / `lib/llm/{index,brain-stream,local-workflow}.ts` / `lib/memory/store.ts` |
 | 2026-11-03 | **P2：`page.tsx` 拆件 + localStorage 防抖** | `app/page.tsx` 1672 → **929 行**，拆出 `app/_components/`：`bubble` / `snack-card` / `filter-panel` / `nav-btn` / `theme-switch` / `theme` / `format` / `storage` / `types` / `constants`（`WELCOME`/`SCENES`/`QUICK`/`BUDGETS`/可信 key）/ `use-debounced-write`。写盘从"每次变化同步 setItem"改成 `useDebouncedWrite`（三处：`cx_chat_v1` 400ms、`cx_profile_v1` 与 `cx_want_v1` 300ms），带 `hydrated` 闸门（首帧不许写，否则只有欢迎语的一版覆盖历史）+ `pagehide` / `visibilitychange` / 卸载时 flush（否则最后几百毫秒的改动会丢） | ✅ Edge 实测：首屏 / 侧栏 / 场景卡渲染正常；发「来点不辣的」出 1 条气泡 + 3 张卡（卡上有价、气泡无价无编号）；刷新后 `cx_chat_v1` 仍有 3 条消息，读档没被首帧覆盖。控制台只有 favicon 404（既有，项目本来就没有 favicon） | `app/page.tsx` / `app/_components/*` / `系统prompt汇总.md` §6 / `AGENTS.md` 规则表 / `README.md` |
@@ -94,7 +113,7 @@
 
 ## 3. 下一步待办（Next）
 
-2026-11-03 **P1 / P2 / P3 全部收口 + 生产构建通过 + 已提交**（见 §2 前两行）。下面是还值得做但没排期的：
+2026-11-03 **V2.0 进行中**：第 0~5 步 + 数据迁移已完成并验过，剩第 6 步（prune / backup 脚本）与第 7 步（文档同步 + 全量回归），详见 §1 表。V1.0 遗留的待办优先级都低于"先把 V2.0 收尾"：
 
 | # | 待办 | 为什么（出处） | 优先级 |
 |---|---|---|---|

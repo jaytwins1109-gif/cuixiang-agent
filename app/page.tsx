@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { AuthDialog, type AuthMode } from './_components/auth-dialog';
 import { Bubble, MsgTime } from './_components/bubble';
 import { FilterPanel } from './_components/filter-panel';
 import { finalPrice } from './_components/format';
 import { NavBtn } from './_components/nav-btn';
 import { SnackCard } from './_components/snack-card';
-import { ensureUserId, stripVolatileProfile } from './_components/storage';
+import { stripVolatileProfile } from './_components/storage';
 import { applyTheme, readTheme } from './_components/theme';
+import { useAuth } from './_components/use-auth';
 import { ThemeSwitch } from './_components/theme-switch';
 import { useDebouncedWrite } from './_components/use-debounced-write';
 import {
@@ -54,6 +56,25 @@ export default function Page() {
    * 落盘逻辑会先把"只有欢迎语"这一版写回去，把历史覆盖掉。
    */
   const [hydrated, setHydrated] = useState(false);
+
+  /**
+   * 账号态：真源在服务端 cookie，这里只是它的投影。
+   * `userId` 未登录时是本地那个 u_xxx——升级不换 id，所以记忆天然继承。
+   */
+  const auth = useAuth();
+  /** 登录/注册弹窗；null = 关着 */
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+
+  /**
+   * 统一请求头：游客身份走 `x-guest-id`（服务端以它为准），
+   * 登录态则认 HttpOnly cookie（`credentials: same-origin` 带上）。
+   * 两条并存：已登录时 cookie 优先，头里的 id 会被忽略——这是服务端定的优先级。
+   */
+  function requestHeaders(): Record<string, string> {
+    return { 'Content-Type': 'application/json', 'x-guest-id': auth.userId };
+  }
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -134,7 +155,9 @@ export default function Page() {
   // 引用要靠 useMemo 稳住，否则输入框敲一个字也会把定时器重置掉。
   const storeSnapshot = useMemo(() => ({ messages, filters }), [messages, filters]);
   useDebouncedWrite(STORE_KEY, storeSnapshot, hydrated, 400);
-  useDebouncedWrite(PROFILE_KEY, profile, hydrated);
+  // 注册成功后要**立刻**把这份缓存作废，所以要拿到 save()：
+  // 只 setProfile({}) 的话，上一个定时器还握着旧值，300ms 后照样写回去
+  const { save: saveProfile } = useDebouncedWrite(PROFILE_KEY, profile, hydrated);
   useDebouncedWrite(WANT_KEY, wantList, hydrated);
 
   useEffect(() => {
@@ -164,6 +187,16 @@ export default function Page() {
     ]);
   }
 
+  /** 服务端快照写进 state：字段缺失一律当空数组，别让 undefined 漏进渲染 */
+  function applyMemorySnapshot(snapshot: Partial<MemorySnapshot> | null | undefined) {
+    const m = snapshot ?? {};
+    setMemory({
+      core_profile: Array.isArray(m.core_profile) ? m.core_profile : [],
+      summary_memory: Array.isArray(m.summary_memory) ? m.summary_memory : [],
+      active_fragments: Array.isArray(m.active_fragments) ? m.active_fragments : [],
+    });
+  }
+
   /**
    * 把后端返回的记忆结果落到前端。
    * 关键在 memory_action：用户本轮说"忘掉XX"/"全都忘掉"时后端已经删了，
@@ -189,14 +222,57 @@ export default function Page() {
     }
 
     if (data.memory && typeof data.memory === 'object') {
-      setMemory({
-        core_profile: Array.isArray(data.memory.core_profile) ? data.memory.core_profile : [],
-        summary_memory: Array.isArray(data.memory.summary_memory) ? data.memory.summary_memory : [],
-        active_fragments: Array.isArray(data.memory.active_fragments)
-          ? data.memory.active_fragments
-          : [],
-      });
+      applyMemorySnapshot(data.memory as MemorySnapshot);
     }
+  }
+
+  /**
+   * 注册 / 登录提交。
+   *
+   * 收尾这一步最容易漏：升级不换 userId，所以本地这份 profile 里还是
+   * "游客时期攒的临时值"。不清掉的话，刷新一次旧缓存又回来了，
+   * 而真源已经在库里——两边打架，用户会看到自己没说过的东西。
+   */
+  async function handleAuthSubmit(email: string, password: string) {
+    const mode = authMode;
+    if (!mode || authBusy) return;
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      const r =
+        mode === 'upgrade'
+          ? await auth.upgrade(email, password)
+          : await auth.login(email, password);
+      if (!r.ok) {
+        setAuthError(r.error || '没成功，稍后再试');
+        return;
+      }
+      setAuthMode(null);
+      if (mode === 'upgrade') {
+        // 立刻盖掉，别等 debounce 那 300ms
+        setProfile({});
+        saveProfile({});
+      }
+      // 服务端快照为准：换了设备登录时，记忆就是从这里补回来的
+      applyMemorySnapshot(await auth.refresh());
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  /**
+   * 退出登录：只清登录态。
+   *
+   * 不清 profile / memory——升级不换 id，退出后还是同一个人的游客态，
+   * 记忆本来就在他身上。清了反而像是"一退出就失忆"。
+   */
+  async function handleLogout() {
+    await auth.logout();
+  }
+
+  function openAuth(mode: AuthMode) {
+    setAuthError(null);
+    setAuthMode(mode);
   }
 
   /**
@@ -207,8 +283,9 @@ export default function Page() {
     try {
       const res = await fetch('/api/ai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, userId: ensureUserId() }),
+        headers: requestHeaders(),
+        credentials: 'same-origin',
+        body: JSON.stringify({ message: text, userId: auth.userId }),
       });
       applyMemoryPayload(await res.json());
     } catch {
@@ -360,7 +437,8 @@ export default function Page() {
 
     const res = await fetch('/api/ai/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: requestHeaders(),
+      credentials: 'same-origin',
       body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
@@ -371,6 +449,19 @@ export default function Page() {
         ...prev,
         { role: 'assistant', content: '说点什么呀', ts: Date.now() },
       ]);
+      return true;
+    }
+    // 限流同理：服务端已经说明了"慢点"，照原话给用户，
+    // 别走下面的降级重发——那会再打一次接口，正好把限流撞得更死
+    if (res.status === 429) {
+      let hint = '慢点，一口气说太多了，缓一下再聊';
+      try {
+        const data = await res.json();
+        if (typeof data?.error === 'string' && data.error) hint = data.error;
+      } catch {
+        /* 响应体不是 JSON 就用默认话术 */
+      }
+      setMessages((prev) => [...prev, { role: 'assistant', content: hint, ts: Date.now() }]);
       return true;
     }
     if (!res.ok || !res.body) return false;
@@ -468,8 +559,9 @@ export default function Page() {
         .slice(-10)
         .map((m) => ({ role: m.role, content: m.content })),
       filters,
-      // 长期记忆挂在固定用户上，刷新/重开浏览器都还是同一个人
-      userId: ensureUserId(),
+      // 长期记忆挂在固定用户上，刷新/重开浏览器都还是同一个人；
+      // 登录后以 cookie 为准，这里的值只是兼容期的兜底
+      userId: auth.userId,
       inRecommendContext: recommendCtx.current,
       // 长期偏好（忌口/口味/场景）随请求带上，后端据此过滤推荐
       userProfile: profile,
@@ -488,7 +580,8 @@ export default function Page() {
       // 流式链路不通（代理不支持、老浏览器）→ 退回一次性接口
       const res = await fetch('/api/ai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: requestHeaders(),
+        credentials: 'same-origin',
         body: JSON.stringify(payload),
       });
 
@@ -810,6 +903,50 @@ export default function Page() {
                 </button>
               </div>
 
+              {/*
+                账号区放在最上面：游客态是"记忆只跟着这台浏览器走"，
+                这句话不显眼就不会有人去注册，而清一次缓存他的忌口就没了。
+              */}
+              <section className="mb-6 rounded-2xl border border-cx-200 bg-cx-50 p-3">
+                <h3 className="mb-2 text-xs font-bold tracking-wider text-cx-400">账号</h3>
+                {auth.loading ? (
+                  <p className="text-xs text-cx-400">正在读取账号…</p>
+                ) : auth.email ? (
+                  <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-cx-700">{auth.email}</div>
+                      <div className="mt-0.5 text-[11px] text-cx-400">换设备登录也不会丢记忆</div>
+                    </div>
+                    <button
+                      onClick={() => void handleLogout()}
+                      className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-cx-200 bg-white px-3 py-1 text-[11px] font-semibold text-cx-600 hover:bg-cx-100"
+                    >
+                      退出
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[11px] leading-relaxed text-cx-400">
+                      你现在是游客，记住的东西只跟着这台浏览器走，清缓存就没了。
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={() => openAuth('upgrade')}
+                        className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-full bg-cx-300 px-3 py-1 text-[11px] font-bold text-white hover:bg-cx-400"
+                      >
+                        注册（保留现在的记忆）
+                      </button>
+                      <button
+                        onClick={() => openAuth('login')}
+                        className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-cx-200 bg-white px-3 py-1 text-[11px] font-semibold text-cx-600 hover:bg-cx-100"
+                      >
+                        登录
+                      </button>
+                    </div>
+                  </>
+                )}
+              </section>
+
               <section className="mb-6">
                 <h3 className="mb-2 text-xs font-bold tracking-wider text-cx-400">想要清单</h3>
                 {wantList.length ? (
@@ -947,6 +1084,20 @@ export default function Page() {
           </div>
         )}
       </div>
+
+      {authMode && (
+        <AuthDialog
+          mode={authMode}
+          busy={authBusy}
+          error={authError}
+          onClose={() => setAuthMode(null)}
+          onSubmit={(email, password) => void handleAuthSubmit(email, password)}
+          onSwitch={(next) => {
+            setAuthError(null);
+            setAuthMode(next);
+          }}
+        />
+      )}
     </div>
   );
 }

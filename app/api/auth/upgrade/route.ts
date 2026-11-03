@@ -59,10 +59,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const guest = await prisma.user.findUnique({ where: { id: guestId } });
-    if (!guest) {
-      return NextResponse.json({ error: '还没有你的记录，先聊一句再来注册' }, { status: 404 });
-    }
-    if (!guest.isGuest) {
+    if (guest && !guest.isGuest) {
       return NextResponse.json({ error: '这个账号已经注册过了，直接登录吧' }, { status: 409 });
     }
 
@@ -73,9 +70,16 @@ export async function POST(req: NextRequest) {
     }
 
     const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const user = await prisma.user.update({
+    /**
+     * 库里没有行是常见情况（新访客还没聊过），不能当成错误：
+     * cx_guest 票据已经证明这个 id 就是他自己的，而且没有任何历史数据要继承，
+     * 直接建行就是"注册"本来的含义。原先这里回 404「先聊一句再来注册」，
+     * 实测把第一次进站就想注册的人挡在门外了。
+     */
+    const user = await prisma.user.upsert({
       where: { id: guestId },
-      data: { email, password: hashed, isGuest: false },
+      create: { id: guestId, email, password: hashed, isGuest: false },
+      update: { email, password: hashed, isGuest: false },
     });
 
     const token = await signUserToken(user.id);

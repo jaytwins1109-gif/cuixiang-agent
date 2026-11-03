@@ -71,6 +71,18 @@
 | 11-03 16:05 | 构建·生产构建（`npx next build`） | 无（命令行） | `✓ Compiled successfully`；`Generating static pages (7/7)`；路由表 `/` 8.78 kB / 首屏 114 kB，`/admin`、`/api/ai`、`/api/ai/stream` 均为 dynamic | ✅ | 先停 dev server（与 build 共用 `.next`）；cmd 前置清 `CODEBUDDY_*` 变量；唯一提示是 "The Next.js plugin was not detected in your ESLint configuration"（未装 `eslint-config-next`，信息级） |
 | 11-03 15:41 / 15:54 | 回归·环境故障两次 | 同上 | ① r1 在 70 秒处 `TypeError: fetch failed … ECONNRESET`（我在 smoke 跑着的时候改了文档，Next 重编译掐断连接）② 另一轮 dev server 起在 `D:\`（日志出现 `lstat 'D:\System Volume Information'`），`/` 与 `/api/ai` 全 404，smoke 只剩 73/130 | ❌→✅ | 处置：`taskkill /PID <pid> /T /F` 重起，并用 `Start-Process -WorkingDirectory` 显式指定目录；跑 smoke 期间不碰任何文件。已记入 `PROGRESS.md` §4 #19 / #20 |
 
+### 2026-11-03「V2.0 数据库 + 鉴权」专项
+
+| 测试时间 | 测试模块 | 用户输入 | 系统表现 | 是否通过 | 备注/排查线索 |
+|---|---|---|---|---|---|
+| 21:03 | 鉴权·游客注册（Edge，全新 profile） | 抽屉「注册（保留现在的记忆）」→ 新邮箱 + 密码 | 下发 `cx_token`；抽屉变「邮箱 / 换设备登录也不会丢记忆 / 退出」；`cx_profile_v1` 变 `{}` | ✅ | 全新浏览器会话，库里**没有**该 id 的 User 行 → 走的是 upgrade 的 upsert 分支 |
+| 21:04 | 鉴权·刷新保持 | 刷新页面 | 仍显示邮箱与「退出」，没回落游客态 | ✅ | cookie 是 HttpOnly，前端只认 `/api/auth/me` |
+| 21:05 | 鉴权·退出 | 点「退出」 | `cx_token` 被清、`cx_guest` 按同一个 id 重新下发，界面回游客态 | ✅ | 退出不换 id，所以记忆不会因为退出而丢 |
+| 21:05 | 鉴权·再登录 | 同邮箱 + 密码 | 重新拿到 `cx_token`，`sub` 与升级时一致 | ✅ | |
+| 本轮先前 | 鉴权·未发消息就注册（修复前） | 同上 | `403 游客身份校验失败`——浏览器压根没有 `cx_guest` 票据 | ❌→✅ | `/api/auth/me` 带 `x-guest-id` 并补发票据后过 |
+| 本轮先前 | 鉴权·新访客注册（修复前） | 同上 | `POST /api/auth/upgrade 404`，弹「还没有你的记录，先聊一句再来注册」 | ❌→✅ | 前端错误提示链路本身是对的；修法是 upgrade 改 upsert |
+| 本轮先前 | 鉴权·账号被删后的旧票 | 库里删掉该用户后发「你记得我什么」 | 修复前日志 `身份=token`（还在按已删账号认人）；修复后 `me` 清票，再请求 `身份=guest` | ❌→✅ | 否则 `writeMemory` 的 upsert 会把删掉的账号复活 |
+
 字段口径（写清楚是为了下一个人能照着复现，不是走过场）：
 
 | 字段 | 写什么 |
