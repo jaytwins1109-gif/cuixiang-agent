@@ -909,10 +909,20 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 微辣只是"有个辣字"，拿它写这句话就是当面扯谎，用户咬一口就是「这些也不辣」。
 `spicy === 1` 的款单独诚实说「微辣，只能提个味（不算重辣）」，不许借用户的需求给它背书。
 
-**改口期不拿旧忌口挡新口味**：`buildNeed` 里若本轮 `taste_preference` 含「辣味」，
-则从 `avoid_tags` 里删掉「辣味」——两边都留着会得到自相矛盾的需求，硬过滤必然 0 候选。
-「不吃辣」是口味忌口（不是过敏），当面说"想吃辣的"本身就意味着改口，要不要真改交给 pending 追问，
-**本轮先按用户此刻说的来**；过敏原（花生 / 坚果 / 海鲜 / 乳制品）不在此列，死命令绝不为口味让路。
+**改口与忌口的互斥处理（`buildNeed`，2026-11-03 定稿）**：`taste` 与 `avoid` 里同时出现「辣味」
+必然得到自相矛盾的需求，硬过滤一定 0 候选。判据用**本轮原话**（`avoidTagsFromText(message)`），
+不能用 `taste`——`prefs.flavor` 是模型填的，它看见 history 里有"想吃辣"就照抄，用户这轮说的可能正相反：
+
+| 本轮原话 | 处理 | 为什么 |
+|---|---|---|
+| 说「还是不想吃辣」 | 从 `taste` 里剔掉「辣味」，`avoid` 留着 | 忌口优先；模型带的辣味回声不算数，留着就是 0 候选 |
+| 说「我想吃辣的」/ 抱怨「这些也不辣」 | 从 `avoid` 里删掉「辣味」 | 当面说想吃的就按此刻来，要不要真改交给 pending 追问 |
+
+过敏原（花生 / 坚果 / 海鲜 / 乳制品）不参与这套让路——死命令绝不为口味挪一步。
+
+**放宽补位必须尊重 `exclude`**：候选不足 3 款时会扩到全库补位，但**不能把 `exclude` 一起丢掉**。
+以前这里传的是空数组，于是用户说「换一个」，上一轮那款又被补回来——等于没换。
+`exclude` 为空时（信息不足 / 单纯改条件）行为与旧版完全一致。
 
 **0 候选话术不再甩锅**：`needFollowUp(0)` 不再说「这个条件有点刁钻」（把锅甩给用户又说不清是哪条过分）。
 被口味卡住时直说"你要的这个口味这批里确实没有完全对得上的，换成微辣 / 中辣，还是换个味道"，
@@ -978,6 +988,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 
 | 日期 | 改动 | 涉及文件 |
 |---|---|---|
+| 2026-11-03 | **全量回归时修掉三处（放宽丢 exclude / 意图纠偏只做了 SSE / 忌口与辣味回声打架）**：跑 137 条 smoke 时逐条查红项，三条都不是"新功能写错"，而是**既有支路的死角**：① 候选不足 3 款时的放宽补位 `hardFilter(PRODUCTS, need, [])` 把 `exclude` 一起丢了 → 用户说「换一个」，上一轮那款又被补回来；改成传 `exclude`（为空时行为不变）② **普通接口 `/api/ai` 一直缺 SSE 那两段意图纠偏**（`upgradeForUrge` 催货升级、`chat + allowRecommend` → recommend），模型偶发把「来点吃的」判成 introduce/chat 时，普通接口就回一句"我没太听懂"或陪聊一句了事，一张卡都没有；顺带把 introduce 抠不出商品名的死路改成"先看用户在不在要货"③ `buildNeed` 的改口让路只看 `taste` 太宽——`prefs.flavor` 是模型照 history 抄来的回声，用户这轮说的可能是「还是不想吃辣」，于是忌口被误删；改成按**本轮原话**（`avoidTagsFromText(message)`）二选一互斥：说忌辣就剔 `taste` 里的回声，说要辣才让 `avoid` 让路。`reco-guard` 新增 4 条把这三句口语钉死 | `lib/llm/local-workflow.ts` / `app/api/ai/route.ts` / `scripts/reco-guard.ts` / 本文件 §7 |
 | 2026-11-03 | **V1.5 四条防线修复（幻影忌口 / 冲突闭环 / 指鹿为马 / 「条件刁钻」）**：先查了提交与 diff —— V2.0 第 2 步 `236240b` 只换存储层（`decideMemoryAction` 是纯函数，注释明写"迁库时刻意一行没动"），第 3 步 `0fa32b1` 对 `handlers.ts` 只搬走 `normalizeUserId` 并 re-export，**均未改语义**；`local-workflow.ts` / `reply-composer.ts` / `patterns.ts` 自 `ae6a4ce` 起没动过。四条现场全部本地复现，根因都在 V1.5：① `NO_SPICY_PATTERN` 末尾的裸 `不辣` 把「这些也不辣」抽成 `avoid='不吃辣'` 写进长期记忆（用户越抱怨越吃不到辣）→ 收窄为只认"不辣就行 / 不辣的那种"式点单说法，并新增 `PICK_REFERENCE_PATTERN` + `SPICY_DENIAL_PATTERN`，抱怨句整轮不写记忆（带长期副词除外）② `decideMemoryAction` 的忌口早退用 `facts.find(...)`，把同轮 unshift 到 `facts[0]` 的改口静默吞掉（忌口照写、pending 不挂）→ 只判 `facts[0]` ③ `buildNeed` 里旧忌口与本轮"要辣"同时进 need（`taste=['辣味']` + `avoid=['辣味']`），硬过滤必然 0 候选 → 改口期删掉矛盾的 `avoid`，本轮按用户明说给货 ④ `rank` 无辣度加分、`buildReasons` 用 `spicy>0` 就给微辣款写"冲着你要的辣味挑的"→ 加 `spicyBonus`（中辣 18 / 重辣 14 / 微辣 4），理由门槛提到 `spicy>=2`，微辣改说"只能提个味" ⑤ `needFollowUp(0)` 不再说「条件有点刁钻」，按"被口味卡住 / 其他"分开说人话。测试：`profile-guard` +7、`reco-guard` +6（`verify` **82/82**），`npm run guard` 全过，`smoke` **137/137** | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `scripts/profile-guard.ts` / `scripts/reco-guard.ts` / `系统prompt汇总.md` |
 | 2026-11-03 | **V2.0 鉴权接进前端（只新增了限流与账号区话术，规则本体未动）**：① 流式入口新增 **429 分支**——用服务端返回的 `error` 原话，默认兜底「慢点，一口气说太多了，缓一下再聊」；**不落**「啊？刚卡了一下」那条通用错误，也**不降级重发**（重发正好把限流撞得更死）② 「我的」抽屉新增「账号」区与注册/登录弹窗文案：游客态「你现在是游客，记住的东西只跟着这台浏览器走，清缓存就没了」、注册页「现在记住的忌口、口味都会跟着走，换手机也不丢」、登录页「登录后接着用你原来的记忆，一件不落」；注册走**游客 id 原地升级**（不新建账号），所以这些承诺是真的 ③ 提示词正文、意图正则、记忆抽取**均未改动** | `app/page.tsx` / `app/_components/use-auth.ts`（新增）/ `app/_components/auth-dialog.tsx`（新增） |
 | 2026-11-03 | **P1+P2+P3 收口（规则没变，搬了位置、立了基线）**：① **前端文案搬家**——`WELCOME` / `SCENES` / `QUICK` / `BUDGETS` / `PROFILE_TRUSTED_KEYS` 从 `app/page.tsx` 移到 `app/_components/constants.ts`，`page.tsx` 只留组装 + 报错兜底文案（"啊？刚卡了一下" / "啊？网断了"），本节 §6 的「文件」口径已按此更新；改开场白/场景/快捷短语请去 `constants.ts`，别再翻 `page.tsx`。② **格式化基线**：`.prettierrc` 改 `singleQuote: true`（对齐既有代码，避免全仓引号大改），`.prettierignore` 排除 `*.md`（手写中文表格格式化只制造噪声）；`format:check` 由 56 个文件不通过 → 全绿。③ **lint 清干净**：删掉搬走后留在 `local-workflow.ts` / `index.ts` / `brain-stream.ts` 的死引用，未用形参改 `_plan` / `_query` / `_reason` 并注明为何保留（对齐 Coze 节点入参），`npm run lint` 0 error 0 warning。④ **单测**：`tests/*.test.ts` 69 条（admin 票据 12 + profile-guard 35 + reco-guard 22），断言仍只在 `scripts/*-guard.ts` 写一份，`GuardResult` 定义在 `scripts/guard-types.ts`，`npm run verify` = `tsc --noEmit && vitest run` | `app/_components/*` / `app/page.tsx` / `eslint.config.mjs` / `vitest.config.ts` / `.prettierrc` / `.prettierignore` / `tests/*` / `scripts/guard-types.ts` / `lib/llm/{index,brain-stream,local-workflow}.ts` / `lib/memory/store.ts` |

@@ -307,8 +307,22 @@ export function buildNeed(input: LocalWorkflowInput): Need {
    * "不吃辣"是口味忌口（不是过敏），当面说"想吃辣的"本身就意味着改口；
    * 要不要真改由记忆层的 pending 追问决定，**本轮先按用户此刻说的来**。
    * 过敏原（花生/坚果/海鲜/乳制品）不在此列——那是死命令，绝不为口味让路。
+   *
+   * 但**不能只看 taste**：`prefs.flavor` 是模型填的，它看见 history 里有"想吃辣"
+   * 就会照抄过来，用户这轮说的其实是「还是不想吃辣」。所以判据是本轮**原话**：
+   * 亲口忌辣（`avoidTagsFromText(message)` 抽得出辣味）就把忌口留住，忌口优先。
+   *
+   * 两条必须**互斥**，不能只做一半：只删 avoid 不删 taste，忌口轮会留下
+   * `taste=['辣味']` + `avoid=['辣味']` 的矛盾需求，硬过滤照样 0 候选。
    */
-  if (taste.has('辣味')) avoid.delete('辣味');
+  const saidNoSpicyThisTurn = avoidTagsFromText(message).includes('辣味');
+  if (saidNoSpicyThisTurn) {
+    // 这轮亲口忌辣：模型/上一轮带过来的辣味回声不算数
+    taste.delete('辣味');
+  } else if (taste.has('辣味')) {
+    // 这轮要辣：旧忌口让路（过敏原一个字都不动）
+    avoid.delete('辣味');
+  }
 
   const scene = (prefs.scene || '').trim();
   const gift_need = /送礼|送人|送朋友|送客户|送同事|伴手礼/.test(message);
@@ -758,7 +772,10 @@ export function runLocalWorkflow(input: LocalWorkflowInput): LocalWorkflowResult
   const finalQualified = qualified;
   let allFiltered = filtered_out;
   if (qualified.length < 3) {
-    const wider = hardFilter(PRODUCTS, need, []);
+    // 放宽时仍带上 exclude：用户说「换一个」，结果上一轮那款又被补回来，
+    // 他会觉得根本没换。之前这里传的是 `[]`，等于把"别重复"这条诉求一起放掉了。
+    // exclude 为空时（信息不足 / 单纯改条件）行为与以前完全一致，不受影响。
+    const wider = hardFilter(PRODUCTS, need, exclude);
     for (const p of wider.qualified) {
       if (!finalQualified.some((x) => x.sku_id === p.sku_id)) finalQualified.push(p);
     }

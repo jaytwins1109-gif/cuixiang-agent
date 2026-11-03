@@ -15,6 +15,9 @@ import {
   mergedPrefs,
   recentUserText,
   UNCLEAR_REPLY,
+  allowRecommend,
+  upgradeForUrge,
+  replyForUpgrade,
   logDegraded,
   type ChatMessage,
   type Filters,
@@ -175,13 +178,14 @@ async function handleTurn({
   if (insistRes) return insistRes;
 
   // 3. 大脑：判断意图 + 抽偏好 + 说人话
+  const brainCtx = {
+    inRecommendContext: body.inRecommendContext,
+    memoryText: renderMemoryForPrompt(memory),
+  };
   const brainRes = await callBrain(
     messages,
     body.filters,
-    {
-      inRecommendContext: body.inRecommendContext,
-      memoryText: renderMemoryForPrompt(memory),
-    },
+    brainCtx,
     // 兜底话术防重要用，也方便日志里按人追
     userId,
   );
@@ -207,18 +211,45 @@ async function handleTurn({
     });
   }
 
-  // 判了 introduce 却从用户原话里抠不出商品名 → 降回陪聊。
-  // 否则出口只能吐"emmm 这个我还不太了解"——那是把我们的解析失败甩给用户
+  // 判了 introduce 却从用户原话里抠不出商品名 → 先看用户是不是在要货。
+  // 否则出口只能吐"emmm 这个我还不太了解"——那是把我们的解析失败甩给用户。
+  // 实测（2026-11-03）：模型偶发返回空内容后重试判成 introduce，
+  // 「我不想吃辣，来点吃的」就被降成陪聊，回一句"我没太听懂"。
   if (brainRes.intent === 'introduce') {
     const hit = findLocalSnack(brainRes.preferences?.product_name) || findLocalSnack(body.message);
     if (!hit) {
-      logDegraded('introduce 但抠不出商品名，降陪聊', {
-        userId,
-        msg: body.message,
-      });
-      traceLocal(traceId, 'introduce 抠不出商品名', '降回陪聊，不吐自曝失败的话术');
-      brainRes.intent = 'chat';
+      if (allowRecommend(body.message, brainCtx)) {
+        traceLocal(traceId, 'introduce 抠不出商品名', '用户在要货 → 转推荐，不降陪聊');
+        brainRes.intent = 'recommend';
+      } else {
+        logDegraded('introduce 但抠不出商品名，降陪聊', {
+          userId,
+          msg: body.message,
+        });
+        traceLocal(traceId, 'introduce 抠不出商品名', '降回陪聊，不吐自曝失败的话术');
+        brainRes.intent = 'chat';
+      }
     }
+  }
+
+  // 与 SSE 同源的两条意图纠偏。普通接口历史上一直缺这两段，
+  // 于是模型偶尔把"来点吃的""再来一轮，不要辣的"判成聊天，这轮就一张卡都没有，
+  // 用户明明在要东西。两条路的纠偏口径必须一致，别再各写一份。
+  const urged = upgradeForUrge(brainRes.intent, body.message);
+  if (urged !== brainRes.intent) {
+    traceLocal(traceId, '意图纠偏:用户在催货', `${brainRes.intent} → ${urged}`);
+    brainRes.intent = urged;
+    // 模型那句是按陪聊写的（"说啥？没头没尾"），留着会变成"嘴上接不住、下面甩三张卡"
+    brainRes.reply = undefined;
+  }
+  if (brainRes.intent === 'chat' && allowRecommend(body.message, brainCtx)) {
+    traceLocal(traceId, '意图纠偏:用户在要东西', 'chat → recommend');
+    brainRes.intent = 'recommend';
+    brainRes.reply = replyForUpgrade(brainRes.reply);
+    logDegraded('判 chat 但用户在要东西，升级推荐', {
+      userId,
+      msg: body.message,
+    });
   }
 
   // 3. 分流：陪聊 / 介绍 / 推荐

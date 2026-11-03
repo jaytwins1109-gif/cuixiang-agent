@@ -257,6 +257,52 @@ export function runRecoGuard(): GuardResult[] {
     );
   }
 
+  // ── 9. 改口 / 忌口 / 抱怨 三条口语，口径必须互斥且都出得了货 ──────
+  // 这三句在语义上相邻但方向相反，只做一半就会翻车：
+  //   "我想吃辣的"   → 旧忌口让路（否则 0 候选）
+  //   "还是不想吃辣" → 忌口优先，且要把模型带的辣味回声剔掉（否则 taste 与 avoid 打架，0 候选）
+  //   "这些也不辣"   → 是抱怨，不是忌口（否则越抱怨越吃不到）
+  setSection('【记忆】改口 / 忌口 / 抱怨 三条口语');
+  {
+    const memNoSpicy = { ...emptyMemory, core_profile: ['忌口：不吃辣'] };
+    const ask = (message: string) =>
+      runLocalWorkflow({
+        message,
+        prefs: { flavor: '辣味' } as Preferences,
+        filters: {} as Filters,
+        memory: memNoSpicy,
+        userId: 'probe_reco',
+        inRecommendContext: true,
+        statedTaste: [],
+      });
+
+    const want = ask('我想吃辣的');
+    report(
+      want.need.avoid_tags.length === 0 && want.recommendations.length > 0,
+      '旧忌口 + 本轮要辣 → 忌口让路且出得了货',
+      `avoid=${want.need.avoid_tags.join(',') || '空'} / ${want.recommendations.length} 张`,
+    );
+
+    const stillNo = ask('还是不想吃辣');
+    report(
+      !stillNo.need.taste_preference.includes('辣味') && stillNo.need.avoid_tags.includes('辣味'),
+      '本轮说「还是不想吃辣」→ 辣味回声从 taste 里剔掉（留着就是 0 候选）',
+      `taste=${stillNo.need.taste_preference.join(',') || '空'} / avoid=${stillNo.need.avoid_tags.join(',') || '空'}`,
+    );
+    report(
+      stillNo.recommendations.length === 3,
+      '「还是不想吃辣」仍然出得了 3 张不辣卡',
+      `${stillNo.recommendations.length} 张`,
+    );
+
+    const complaint = ask('这些也不辣');
+    report(
+      !complaint.need.avoid_tags.includes('辣味') && complaint.recommendations.length > 0,
+      '抱怨「这些也不辣」→ 不当忌口，仍然给得出辣卡',
+      `avoid=${complaint.need.avoid_tags.join(',') || '空'} / ${complaint.recommendations.length} 张`,
+    );
+  }
+
   return results;
 }
 
