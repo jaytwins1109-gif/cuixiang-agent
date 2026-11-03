@@ -1,0 +1,4 @@
+# 容器里直接执行的脚本必须是 LF 行尾。
+# Windows 默认 core.autocrlf=true 会把它转成 CRLF，容器启动时报
+# "/usr/local/bin/docker-entrypoint.sh: not found"（看着像文件不存在，其实是 \r 作祟）。
+*.sh text eol=lf

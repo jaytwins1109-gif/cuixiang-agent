@@ -1,0 +1,63 @@
+# docker-compose.yml —— 本地/单机 VPS 一键部署
+#
+#   docker compose up -d --build
+#
+# 两个服务，顺序由 depends_on 保证：
+#   migrate —— 一次性跑 `prisma migrate deploy`，跑完即退（restart: "no"）
+#   app     —— Next 生产进程，等 migrate 成功退出后才启动
+#
+# 所以"启动前先跑 db:deploy"这件事已经被编排好了，不会出现表还没建就接流量。
+# 想手动迁库：docker compose run --rm migrate
+#
+# 关键点：./data 挂到 /app/data。SQLite 文件就在宿主机上，容器重建不丢。
+# .env 里的 DATABASE_URL 写 `file:../data/cuixiang.db`（相对 prisma/schema.prisma），
+# 在容器里正好解析到 /app/data/cuixiang.db。
+
+services:
+  migrate:
+    build:
+      context: .
+      target: migrator
+    image: cuixiang-migrator:latest
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        mkdir -p /app/data
+        echo "[migrate] prisma migrate deploy ..."
+        npx prisma migrate deploy
+        # SQLite 文件的属主必须是 nextjs(1001)，否则 app 容器写不进去（EACCES）
+        chown -R 1001:1001 /app/data 2>/dev/null || true
+        echo "[migrate] done"
+    restart: 'no'
+
+  app:
+    build:
+      context: .
+      target: runner
+    image: cuixiang-app:latest
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      # 记忆里的"今天/昨天"按北京时间算，容器默认 UTC 会差 8 小时
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/app/data
+    ports:
+      - '3000:3000'
+    restart: unless-stopped
+    healthcheck:
+      # alpine 自带 busybox wget，不额外装 curl
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # 首次启动要等 Prisma 引擎加载与首页编译，给 25 秒缓冲
+      start_period: 25s

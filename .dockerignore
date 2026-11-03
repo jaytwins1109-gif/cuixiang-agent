@@ -1,0 +1,38 @@
+# 构建上下文只要源码 + prisma + 配置；其余一律不进 context，镜像更小、构建更快
+node_modules
+.next
+.git
+.gitignore
+
+# 数据与备份：绝不能烤进镜像（本地库里是真实用户记忆）
+data
+
+# 密钥：.env.local 里有 API Key 与 AUTH_SECRET，只允许运行时注入
+.env
+.env.local
+.env*.local
+!.env.example
+
+# 日志与本地产物
+*.log
+dev*.log
+*.out.log
+*.err.log
+smoke-*.txt
+smoke-*.flag
+build.log
+build.flag
+*.prev.log
+
+# 与运行无关的文档/工具
+docs
+tests
+.playwright-cli
+.codebuddy
+*.md
+
+# Docker 自身文件不需要进上下文（compose 单独读）
+Dockerfile
+docker-compose.yml
+docker-entrypoint.sh
+.dockerignore
