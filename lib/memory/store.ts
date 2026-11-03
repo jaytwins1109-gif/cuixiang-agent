@@ -130,6 +130,17 @@ async function readStore(): Promise<Store> {
 
 async function writeStore(store: Store): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true })
+
+  // 写前备份：把当前这一版先复制成 memory.json.bak，再覆盖。
+  // 原子写只挡「文件被写成半截」，挡不住「整份被一份错数据覆盖」——
+  // 并发写丢记忆、或上游传进来空 store 时，至少还有上一版可以捞回来。
+  // 首次运行（或手动清空过 data/）还没有 memory.json，复制失败属正常，忽略。
+  try {
+    await fs.copyFile(MEMORY_FILE, `${MEMORY_FILE}.bak`)
+  } catch {
+    /* 没有旧文件就没什么可备份的 */
+  }
+
   // 原子写：先写临时文件再改名，避免半截文件
   const tmp = `${MEMORY_FILE}.${process.pid}.tmp`
   await fs.writeFile(tmp, JSON.stringify(store, null, 2), 'utf8')

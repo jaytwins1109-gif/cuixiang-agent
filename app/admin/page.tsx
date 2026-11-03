@@ -1,5 +1,11 @@
 import { cookies } from 'next/headers'
 import { createHash } from 'crypto'
+import {
+  createSessionTicket,
+  verifySessionTicket,
+  safeEqualHex,
+  SESSION_MAX_AGE_SECONDS,
+} from '@/lib/admin/session'
 
 const COOKIE = 'cx_admin'
 
@@ -13,13 +19,16 @@ async function login(formData: FormData) {
   const expected = process.env.ADMIN_PASSWORD_HASH
 
   if (!expected) return
-  if (sha256(pw) !== expected) return
+  if (!safeEqualHex(sha256(pw), expected)) return
 
+  // 票据由服务端用 ADMIN_PASSWORD_HASH 派生密钥签名，
+  // 光手写一个 cookie 名进来是过不了校验的。
   const store = await cookies()
-  store.set(COOKIE, '1', {
+  store.set(COOKIE, createSessionTicket(expected), {
     httpOnly: true,
     sameSite: 'lax',
-    maxAge: 60 * 60 * 8, // 8 小时
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: SESSION_MAX_AGE_SECONDS, // 8 小时
     path: '/',
   })
 }
@@ -33,7 +42,7 @@ async function logout() {
 export default async function AdminPage() {
   const hash = process.env.ADMIN_PASSWORD_HASH
   const store = await cookies()
-  const authed = hash && store.get(COOKIE)?.value === '1'
+  const authed = verifySessionTicket(store.get(COOKIE)?.value, hash)
 
   // 未设置口令：给出配置方法，不让任何人进得来
   if (!hash) {
