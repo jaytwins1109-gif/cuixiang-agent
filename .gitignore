@@ -37,3 +37,10 @@ smoke-*.flag
 
 # 长期记忆落盘（含用户偏好，不提交）
 /data
+
+# SQLite 数据库文件（含用户数据与密码哈希，一律不提交）
+# 注意：prisma/migrations/ 是源码，必须提交；这里只挡运行期库文件。
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

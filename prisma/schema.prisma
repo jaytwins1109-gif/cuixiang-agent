@@ -1,0 +1,67 @@
+// prisma/schema.prisma
+//
+// V2.0 数据层：把「长期记忆」从 data/memory.json 搬进 SQLite。
+//
+// 几条刻意的取舍（改之前先读，别按直觉"优化"）：
+//   1. layer / status / polarity 用 String 不用 enum —— SQLite 不支持 Prisma enum。
+//      类型安全由 lib/memory/store.ts 里的 TS 联合类型守住，库里只是文本。
+//   2. 不加 @@unique([userId, layer, keyword, status]) —— 现有语义允许同一个 keyword
+//      同时存在 active / deleted / superseded 多行（软删除要留痕）。加唯一键会在
+//      状态流转时直接冲突。去重仍由事务内的 findFirst 完成。
+//   3. category / polarity / source / createdAt 是用户清单里没写、但现有代码在用的字段，
+//      不落库就是静默丢数据。
+//   4. User.id 沿用现有的 u_xxx / guest_xxx：游客升级成正式用户时**不换 id**，
+//      记忆天然继承，不需要搬数据。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  // file:../data/cuixiang.db —— 相对 schema 所在目录，最终落在项目根的 data/ 下。
+  // data/ 已被 .gitignore 排除，库文件和归档备份都在一起。
+  url      = env("DATABASE_URL")
+}
+
+/// 用户：游客与注册用户同一张表，靠 isGuest 区分
+model User {
+  id        String   @id // u_xxx / guest_xxx，升级时不换
+  email     String?  @unique // 游客为 null
+  password  String? // bcrypt hash，游客为 null
+  isGuest   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memories Memory[]
+}
+
+/// 长期记忆：替代 data/memory.json 里的 MemoryRecord[]
+model Memory {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// core_profile | summary_memory | fragment_memory
+  layer   String
+  keyword String
+  content String
+  /// active | pending | resolved | superseded | deleted
+  status  String  @default("active")
+  /// 适用场景，没有则 null
+  context String?
+
+  /// 「过敏忌口」等分类，factsFromMessage / decideMemoryAction 用
+  category String?
+  /// 喜欢 | 不喜欢 | 拒绝 | 接受 | 中立 | 不确定
+  polarity String?
+  /// 「对话提取」「冲突确认」
+  source   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 召回按 (userId, layer, status) 过滤，写盘上限按 (userId, updatedAt) 排序
+  @@index([userId, layer, status])
+  @@index([userId, updatedAt])
+}
