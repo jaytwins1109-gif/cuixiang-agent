@@ -13,10 +13,10 @@
 | 项 | 状态 |
 |---|---|
 | 最后更新 | 2026-11-03（会话：V1.0 封版 → P1+P2+P3 收口 → **V2.0 数据库化 + 鉴权：第 0~5 步 + 数据迁移执行**） |
-| 当前在做 | **第 5 步（前端 `useAuth` + 注册/登录）代码写完并验过，待提交**。第 0~4 步已提交（见 §2 前 4 行）；V2.0 结束后 V1.0 的 P1/P2/P3 结论仍有效 |
+| 当前在做 | **第 5 步已提交（`8d76653`）、第 6 步（prune + backup 脚本）写完并验过，待提交**。剩第 7 步：文档同步 + `verify`/`guard`/`smoke` 全量回归 |
 | 最近回归 | `npm run verify` **69/69**、`npm run lint` **0 error 0 warning**、`format:check` **全绿**、`guard` **profile 全过 + reco 21/21**、`next build` **成功**（`✓ Compiled successfully`，7/7 静态页，`/` 首屏 114 kB）；`npm run smoke` **r1 130/130、r2 128/130、r3 130/130**（r2 两条失败都是模型随机会话态：§4 #12「无任何偏好仍追问」与「还是不想吃辣只出 2 张」，与 P1~P3 无关）；浏览器实测：首屏/推荐卡片/刷新读档全正常；**V2.0 第 5 步**：`verify` 69/69、lint 0/0、format 全绿，Edge 实测「游客 → 注册 → 刷新保持登录 → 退出 → 再登录」全过（smoke 留到第 7 步全量跑） |
 | 阻塞 | 无 |
-| 下一步 | **第 6 步**：`scripts/prune-memory.mjs` 还读 `data/memory.json`（已改名，跑不动）→ 改走 Prisma；新增 `scripts/backup-db.mjs`（SQLite 备份）；确认仓库里再无 JSON 写入路径。**第 7 步**：`系统prompt汇总.md` 同步 + `verify`/`guard`/`smoke` 全量回归 |
+| 下一步 | **第 7 步**：`系统prompt汇总.md` 变更记录已补、仓库里 JSON 写入路径已清 → 还差一轮 `verify`/`guard`/`smoke` 全量回归，然后提交收尾 |
 | 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8）；`npm run build` 前必须先停 dev server（两者共用 `.next`） |
 
 ---
@@ -34,7 +34,7 @@
 | 4 | `scripts/smoke.mjs` 读写全换 Prisma + 统一 `x-guest-id` 头（顺带补两处漏 `await`） | ✅ 已提交 `a597ecc` |
 | 5 | 前端：`use-auth.ts` / `auth-dialog.tsx` / `page.tsx` 接入 / 抽屉账号区 / 升级后清 profile 缓存 / 429 话术 | ✅ 已验，待提交 |
 | — | 数据迁移已执行：**45 用户 / 51 条**入库，原文件改名 `data/memory.json.migrated-20261103` | ✅ |
-| 6 | `prune-memory.mjs` 改走 Prisma + 新增 `backup-db.mjs` | ⬜ 下一步 |
+| 6 | `prune-memory.ts`（Prisma 版：先归档再删，游客整行删 / 账号只清记忆）+ `backup-db.ts`（`VACUUM INTO` 在线备份 + 保留策略） | ✅ 待提交 |
 | 7 | `系统prompt汇总.md` 同步 + `verify`/`guard`/`smoke` 全量回归 | ⬜ |
 
 **V1.0 的 P1/P2/P3 已收口**（见 §2），此前的七项修复与两个 Bug 也都验过（见 §2）。
@@ -78,6 +78,7 @@
 
 | 日期 | 任务 | 结果 | 关键落点 |
 |---|---|---|---|
+| 2026-11-03 | **V2.0 第 6 步：清理与备份脚本切到数据库** | ① `scripts/prune-memory.ts`（替代旧 `.mjs`）：默认只清**游客**、`--include-accounts` 才碰正式账号（且只清记忆、保留账号）；"未活跃"按**记忆最后更新时间**判（不能用 `User.updatedAt`——写记忆只在缺失时插用户行，不更新它）；真删之前先把原文写进 `data/memory-archive-<日期>.json`（结构仍是 `uid → 记忆数组`，可人工捞）；`--smoke-only` 只清 `smoke_` 前缀 ② `scripts/backup-db.ts`：`VACUUM INTO` 在线备份（WAL 下复制主文件会漏事务，三个文件一起 copy 又有写入竞态），`--keep=N` 只清自动命名的旧备份、`--out=` 指定的文件永不参与清理 ③ `package.json` 加 `db:backup`，`prune-memory` 改走 ts-alias-register ④ 清掉残留口径：`page.tsx` 注释、README、`系统prompt汇总.md` §4 都还写着 `data/memory.json` | ✅ 造两个 30 天未活跃用户（`@updatedAt` 手改不动，只能用原始 SQL 拨时间）验证：试运行默认列 1 个游客、加 `--include-accounts` 列 2 个；`--apply` 后游客行已删、账号行保留且记忆 0 条、归档文件含两条原文。备份连跑三次：文件名 `cuixiang-2026-11-03-13-12-44.db`、头部 `SQLite format 3`、`--keep=1` 清掉 2 份留存 1 份（**修了一个 bug**：初版时间戳留了 `T`，清理正则匹配不上，保留策略形同虚设） | `scripts/{prune-memory,backup-db}.ts`（新增）/ `scripts/prune-memory.mjs`（删除）/ `package.json` / `README.md` / `app/page.tsx` / `系统prompt汇总.md` §4 |
 | 2026-11-03 | **V2.0 第 5 步：前端 `useAuth` + 注册/登录** | ① `use-auth.ts`：以 `/api/auth/me` 为唯一真源（**不**把账号态写进 localStorage），`userId` 永有值（未登录=本地 `u_xxx`，升级不换 id 所以记忆天然继承）；`upgrade / login / logout / refresh` 四个动作 ② `auth-dialog.tsx`：注册/登录同一组件双模式，前端先校验邮箱格式与密码长度 ③ `page.tsx`：抽屉顶部「账号」区、`AuthDialog` 挂载、三处 fetch 统一 `requestHeaders()`、流式 429 用服务端原话（不再落「刚卡了一下」）④ `use-debounced-write` 新增 `save()`：升级成功后**立刻**用 `{}` 盖掉 profile 缓存（只 `setProfile({})` 会被 pending 定时器写回旧值）⑤ 升级/登录后 `refresh()` 拿服务端快照覆盖本地 | ✅ `verify` 69/69、lint 0/0、format 全绿；Edge 实测：游客注册（新邮箱）→ 抽屉显示邮箱 → 刷新仍登录 → 退出回游客态 → 再登录成功；`cx_profile_v1` 升级后为 `{}`；两个测试账号已物理清理 | `app/_components/{use-auth,auth-dialog,use-debounced-write}` / `app/page.tsx` / `app/api/auth/{me,upgrade}/route.ts` |
 | 2026-11-03 | **V2.0 第 5 步联调修了三个断点**（都是真机上点出来的） | ① 新访客点「注册」必 403：`cx_guest` 票据只在发过消息后才有 → `/api/auth/me` 认 `x-guest-id`，票据缺失时**补发一张** ② 从没聊过的人注册被 404「先聊一句再来注册」（库里无 User 行）→ 改 `upsert` 直接建行（票据已证明 id 归属，且无历史数据可继承）③ 账号被删后旧 `cx_token` 仍被当登录态（还能被 `writeMemory` upsert 复活）→ `me` 发现「票有效但库里没人」就清票，浏览器自愈 | ✅ 三条都在 Edge 里复现→修复→复测；直连 `me` 确认下发 `cx_guest=...; HttpOnly; SameSite=Lax` | `app/api/auth/me/route.ts` / `app/api/auth/upgrade/route.ts` |
 | 2026-11-03 | **V2.0 第 4 步：smoke 适配数据库** | `seedMemories/readMemories/allUserIds/pruneUsers` 全改 async Prisma，`--only-prune` 按 `smoke_` 前缀物理清理；`ask()` 统一带 `x-guest-id`；第 13 节两处 `seed()` 调用漏 `await`（请求跑在写库前） | ✅ 补 `await` 后 r4~r6 稳定；SSE 一条失败是 DeepSeek 402 余额不足，与改造无关 | `scripts/smoke.mjs` |

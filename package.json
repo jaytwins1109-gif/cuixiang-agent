@@ -19,12 +19,13 @@
     "smoke": "node scripts/smoke.mjs",
     "capture-log": "node scripts/capture-log.mjs",
     "gen-password": "node scripts/gen-password.mjs",
-    "prune-memory": "node scripts/prune-memory.mjs",
+    "prune-memory": "node --import ./scripts/ts-alias-register.mjs scripts/prune-memory.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
+    "db:backup": "node --import ./scripts/ts-alias-register.mjs scripts/backup-db.ts",
     "migrate-json": "node scripts/migrate-memory-json.mjs"
   },
   "dependencies": {

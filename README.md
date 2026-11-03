@@ -46,12 +46,22 @@ npm run guard    # 守卫脚本 CLI 版（profile-guard + reco-guard），和 vi
 
 > `verify` / `lint` / `format:check` 全绿才值得去跑 smoke——smoke 一轮要好几分钟。
 
-**记忆文件归档**（防止 `data/memory.json` 无限膨胀）：
+**长期记忆清理**（V2.0 之后存在 SQLite 里，脚本走 Prisma）：
 
 ```bash
-node scripts/prune-memory.mjs                # 默认试运行，只看会清掉谁
-node scripts/prune-memory.mjs --apply        # 真的清
-node scripts/prune-memory.mjs --days=30 --apply
+npm run prune-memory                          # 默认试运行：列出 7 天未活跃的游客
+npm run prune-memory -- --apply               # 真的清（先归档到 data/memory-archive-<日期>.json）
+npm run prune-memory -- --days=30 --apply     # 改成 30 天
+npm run prune-memory -- --include-accounts    # 连正式账号的记忆一起清（账号本身保留）
+npm run prune-memory -- --smoke-only          # 只清 smoke_ 前缀的测试用户
+```
+
+**数据库备份**（`VACUUM INTO` 在线备份，不用停服务）：
+
+```bash
+npm run db:backup                 # → data/backups/cuixiang-<时间戳>.db
+npm run db:backup -- --keep=30    # 只留最近 30 份自动备份
+npm run db:backup -- --out=d:/tmp/cx.db   # 指定目标文件（不会被 --keep 清理）
 ```
 
 ---
@@ -194,7 +204,8 @@ scripts/
   fallback-guard.ts     兜底链路的忌口守卫
   guard-types.ts        守卫结果的统一形状（CLI 与 vitest 共用）
   gen-password.mjs      生成后台口令哈希
-  prune-memory.mjs      记忆归档清理
+  prune-memory.ts       长期记忆清理（Prisma，先归档再删）
+  backup-db.ts          SQLite 在线备份（VACUUM INTO）
 tests/
   *.test.ts             vitest：把上面三份守卫的断言变成正式用例
 ```

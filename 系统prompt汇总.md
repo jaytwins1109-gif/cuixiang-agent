@@ -570,7 +570,7 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 
 **文件**：`lib/memory/store.ts`
 
-照 Coze 工作流的记忆分层设计落地，去掉对 Coze 长期记忆组件的依赖。存储：`data/memory.json`，原子写（临时文件 + 改名）。
+照 Coze 工作流的记忆分层设计落地，去掉对 Coze 长期记忆组件的依赖。存储：**V2.0 起为 SQLite（Prisma，`data/cuixiang.db` 的 `User` / `Memory` 两张表）**；V1.0 的 `data/memory.json` 已迁移并改名留档（`memory.json.migrated-20261103`），不再有 JSON 写入路径。写入用 `prisma.$transaction` 包住，语义（分层 / 五状态 / 200 条上限）与 JSON 时代一致。
 
 ### 4.1 三层与五状态
 
