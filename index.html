@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>脆香零食 · 入口</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  #check {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+    background: #fdf6ec; color: #8a6d3b; font-size: 15px; text-align: center;
+  }
+  #check .dot { width: 10px; height: 10px; border-radius: 50%; background: #f0b95c; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  #check b { color: #c0392b; }
+  #app { display: none; position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+
+<div id="check">
+  <div class="dot"></div>
+  <div>正在连接本地服务…</div>
+</div>
+
+<iframe id="app" src="http://localhost:3000"></iframe>
+
+<script>
+  // 探测 dev server 是否在跑：在跑就全屏嵌入真实应用，没跑就提示怎么启动
+  const check = document.getElementById('check')
+  const app = document.getElementById('app')
+
+  async function probe() {
+    try {
+      await fetch('http://localhost:3000/', { mode: 'no-cors', cache: 'no-store' })
+      check.style.display = 'none'
+      app.style.display = 'block'
+    } catch {
+      check.innerHTML =
+        '<div style="font-size:40px">🥨</div>' +
+        '<div>本地服务还没启动</div>' +
+        '<div>双击项目根目录的 <b>启动.bat</b>，等窗口提示就绪后刷新本页</div>' +
+        '<button onclick="location.reload()" style="margin-top:8px;padding:8px 24px;border:0;border-radius:20px;background:#f0b95c;color:#fff;font-size:14px;cursor:pointer">重新连接</button>'
+    }
+  }
+  probe()
+</script>
+
+</body>
+</html>

@@ -1,0 +1,158 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ────────────────────────────────────────────────
+   皮肤：一套变量名，三套取值。
+   变量存 RGB 通道，配合 tailwind 的 rgb(var(--x) / <alpha-value>)
+   才能同时支持 bg-cx-50 和 bg-cx-700/30 两种写法。
+   命名口径（亮色下）：50 越浅越靠背景，700 越深越靠正文。
+   暗色皮肤做语义反转——最喜欢-*变成浅色，
+   这样 text-cx-700 在深底上自动变成可读的浅字，不用改组件。
+   ──────────────────────────────────────────────── */
+:root,
+[data-theme='warm'] {
+  /* 暖阳棕（默认） */
+  --cx-50:  255 248 240;  /* #FFF8F0 奶油背景 */
+  --cx-100: 255 238 216;  /* #FFEED8 浅暖 */
+  --cx-200: 255 217 168;  /* #FFD9A8 暖橙浅 */
+  --cx-300: 255 184 77;   /* #FFB84D 主色 */
+  --cx-400: 255 159 26;   /* #FF9F1A 深橙 */
+  --cx-500: 232 133 11;   /* #E8850B 强调 */
+  --cx-600: 179 101 8;    /* #B36508 正文 */
+  --cx-700: 139 74 6;     /* #8B4A06 深文字 */
+
+  --cx-surface: 255 255 255;  /* 卡片/面板底：亮色下就是纯白 */
+  --cx-shadow:  180 101 8;    /* 投影底色 */
+  --cx-scroll:  255 217 168;  /* 滚动条 */
+}
+
+[data-theme='obsidian'] {
+  /* 曜石黑：语义反转，50 最深、700 最浅 */
+  --cx-50:  26 23 21;
+  --cx-100: 44 39 35;
+  --cx-200: 66 59 52;
+  --cx-300: 210 129 28;
+  --cx-400: 232 155 43;
+  --cx-500: 240 174 74;
+  --cx-600: 232 221 210;
+  --cx-700: 245 238 230;
+
+  --cx-surface: 37 33 29;
+  --cx-shadow:  0 0 0;
+  --cx-scroll:  88 78 68;
+}
+
+[data-theme='glacier'] {
+  /* 冰川蓝 */
+  --cx-50:  242 248 253;
+  --cx-100: 220 235 248;
+  --cx-200: 185 216 240;
+  --cx-300: 59 147 218;
+  --cx-400: 42 128 200;
+  --cx-500: 31 107 176;
+  --cx-600: 51 80 107;
+  --cx-700: 30 50 73;
+
+  --cx-surface: 251 253 255;
+  --cx-shadow:  30 90 140;
+  --cx-scroll:  185 216 240;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  html {
+    /* 页根也铺上底色，滚动到边缘时不会露出白边 */
+    background-color: rgb(var(--cx-50));
+  }
+
+  body {
+    @apply bg-cx-50 text-cx-700;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  }
+
+  /**
+   * 深色皮肤下把写死的白底换成面板色。
+   * 用 [class*=] 模糊匹配，bg-white / bg-white/80 / bg-white/85 一次全覆盖，
+   * 省得逐个组件改 className。
+   */
+  [data-theme='obsidian'] [class*='bg-white'] {
+    background-color: rgb(var(--cx-surface));
+  }
+
+  /* 深色下图片在暗卡片里太跳，压一点亮度 */
+  [data-theme='obsidian'] img {
+    filter: brightness(0.9);
+  }
+
+  /* 换皮肤只给大面积底色做缓冲，hover 这类微交互保持原本的干脆 */
+  [data-theme] body,
+  [data-theme] header,
+  [data-theme] aside,
+  [data-theme] [class*='bg-white'] {
+    transition: background-color 0.25s ease, color 0.25s ease,
+      border-color 0.25s ease;
+  }
+}
+
+@layer utilities {
+  /* 聊天气泡下方的时间：极淡，不抢话术本身的位置 */
+  .msg-time {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 聊天区滚动条：细一点，别抢戏 */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--cx-scroll)) transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background: rgb(var(--cx-scroll));
+    border-radius: 9999px;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* 加载中的三个点 */
+  .dot-typing span {
+    animation: blink 1.2s infinite both;
+  }
+  .dot-typing span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .dot-typing span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes blink {
+    0%,
+    80%,
+    100% {
+      opacity: 0.25;
+    }
+    40% {
+      opacity: 1;
+    }
+  }
+}
+
+/* 流式被 final 改写时的平滑过渡：整段换字前先淡入，别让用户看到"啪"地一跳 */
+@keyframes bubble-swap {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.bubble-swap {
+  animation: bubble-swap 0.35s ease-out;
+}
