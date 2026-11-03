@@ -196,6 +196,67 @@ export function runRecoGuard(): GuardResult[] {
     report(good.startsWith('行，那给你挑几个不齁的。'), '正常过渡语原样保留', good);
   }
 
+  // ── 8. 改口不挡路 + 微辣不冒充 ──────────────────────────────────
+  // 事故原型（2026-11-03）：用户以前说过"不吃辣"，这次说"我想吃辣的"，
+  // need 里 taste=['辣味']、avoid=['辣味'] 自相矛盾 → 硬过滤全踢 → 0 候选 →
+  // 回"这个条件有点刁钻"。同时要辣却把微辣的黑胡椒薯角推上来，
+  // 理由还写"冲着你要的辣味挑的"，用户咬一口就发现不辣。
+  setSection('【记忆】改口不挡路 / 微辣不冒充');
+  {
+    const memAvoid = { ...emptyMemory, core_profile: ['忌口：不吃辣'] };
+    const clash = runLocalWorkflow({
+      message: '我想吃辣的',
+      prefs: { flavor: '辣味' } as Preferences,
+      filters: {} as Filters,
+      memory: memAvoid,
+      userId: 'probe_reco',
+      inRecommendContext: true,
+      statedTaste: ['辣味'],
+    });
+
+    report(
+      !clash.need.avoid_tags.includes('辣味'),
+      '改口期不拿旧忌口挡本轮明确要的辣',
+      clash.need.avoid_tags.join(',') || '（空）',
+    );
+    report(
+      clash.recommendations.length > 0,
+      '旧忌口 + 本轮要辣 → 仍然出得了货',
+      String(clash.recommendations.length),
+    );
+
+    const top = PRODUCT_BY_NAME.get(clash.recommendations[0]?.name || '');
+    report(
+      (top?.spicy ?? 0) >= 2,
+      '要辣时第一名是中辣以上（不让微辣占坑）',
+      `${clash.recommendations[0]?.name}(spicy=${top?.spicy})`,
+    );
+
+    const weak = clash.recommendations.filter(
+      (c) => (PRODUCT_BY_NAME.get(c.name)?.spicy ?? 0) === 1,
+    );
+    const liar = weak.filter((c) =>
+      (c.user_visible_reasons || []).some((r) => r.includes('冲着你要的辣味')),
+    );
+    report(
+      liar.length === 0,
+      '微辣商品不写「冲着你要的辣味挑的」',
+      liar.map((c) => c.name).join(',') || '无',
+    );
+    const weakReason = weak[0]?.user_visible_reasons?.join(' / ') || '';
+    report(
+      !weak.length || weakReason.includes('微辣'),
+      '微辣商品改说「微辣，只能提个味」',
+      weakReason || '（没有微辣款）',
+    );
+
+    report(
+      !(needFollowUp(0) || '').includes('刁钻'),
+      '0 款时不甩锅「条件有点刁钻」',
+      needFollowUp(0) || '（空）',
+    );
+  }
+
   return results;
 }
 

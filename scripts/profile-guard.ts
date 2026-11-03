@@ -16,9 +16,15 @@
 //   3. smoke 第 33 节 → 同样拉起 CLI
 // 所以断言逻辑在 `runProfileGuard()` 里，`process.argv[1]` 判断了才走 CLI。
 
-import { pickTrustedProfile, cleanProfile, extractMemoryKeyword } from '@/lib/chat/handlers';
+import {
+  pickTrustedProfile,
+  cleanProfile,
+  extractMemoryKeyword,
+  factsFromMessage,
+} from '@/lib/chat/handlers';
 import { extractPrefsFromText } from '@/lib/llm';
 import { avoidTagsFromText, budgetFromText } from '@/lib/llm/local-workflow';
+import { decideMemoryAction, type RecalledMemory } from '@/lib/memory/store';
 import type { GuardResult } from './guard-types';
 
 export function runProfileGuard(): GuardResult[] {
@@ -161,6 +167,91 @@ export function runProfileGuard(): GuardResult[] {
     extractMemoryKeyword('忘掉吧') === '',
     '反向对照：没有偏好词就老实抠不出（不瞎猜）',
     extractMemoryKeyword('忘掉吧') || '（空，正确）',
+  );
+
+  /**
+   * 抱怨句不是忌口声明。
+   *
+   * 事故原型（2026-11-03）：用户嫌推的不够辣，说「这些也不辣」，被抽成
+   * `avoid='不吃辣'` 记进长期记忆；下一轮再要辣，`buildNeed` 把「辣味」同时
+   * 塞进 `taste_preference` 和 `avoid_tags`，硬过滤把辣款全踢光，
+   * 只能回一句「这个条件有点刁钻」。越抱怨越吃不到。
+   */
+  const emptyMemory: RecalledMemory = {
+    core_profile: [],
+    summary_memory: [],
+    active_fragments: [],
+    pending_fragments: [],
+  };
+  const memAvoid: RecalledMemory = {
+    ...emptyMemory,
+    core_profile: ['忌口：不吃辣'],
+  };
+
+  const complaint = extractPrefsFromText('这些也不辣');
+  report(!complaint.avoid, '「这些也不辣」不当成忌口', JSON.stringify(complaint));
+
+  // 反向对照：真说忌口必须照记，别把整条通道关死
+  const realAvoid = extractPrefsFromText('我不吃辣');
+  report(realAvoid.avoid === '不吃辣', '「我不吃辣」仍然记成忌口', realAvoid.avoid || '（丢了）');
+  report(
+    factsFromMessage('我不吃辣', { avoid: '不吃辣' }, emptyMemory).some(
+      (f) => f.category === '过敏忌口',
+    ),
+    '「我不吃辣」本轮产出忌口事实',
+    JSON.stringify(factsFromMessage('我不吃辣', { avoid: '不吃辣' }, emptyMemory)),
+  );
+
+  report(
+    factsFromMessage('这些也不辣', { flavor: '辣味', avoid: '不吃辣' }, memAvoid).length === 0,
+    '纯抱怨句不写任何记忆事实（prefs 里的回声也不算）',
+    JSON.stringify(factsFromMessage('这些也不辣', { flavor: '辣味', avoid: '不吃辣' }, memAvoid)),
+  );
+
+  // 有长期副词时仍算偏好陈述，不能被"抱怨"一条全拦掉
+  report(
+    factsFromMessage('这些也不辣，我平时都喜欢吃辣的', { flavor: '辣味' }, emptyMemory).length > 0,
+    '反向对照：抱怨里带长期偏好陈述 → 仍然记',
+    JSON.stringify(
+      factsFromMessage('这些也不辣，我平时都喜欢吃辣的', { flavor: '辣味' }, emptyMemory),
+    ),
+  );
+
+  /** 改口优先于忌口：冲突事实排在 facts[0] 时，不能被同轮的忌口事实吞掉 */
+  const wantFacts = factsFromMessage('我想吃辣的', { flavor: '辣味' }, memAvoid);
+  report(
+    decideMemoryAction(wantFacts, memAvoid).decision === 'confirmation_required',
+    '要辣撞上「不吃辣」→ 挂待确认（不是直接改写）',
+    decideMemoryAction(wantFacts, memAvoid).decision,
+  );
+  report(
+    decideMemoryAction(
+      [
+        { category: '口味', key: '辣', value: '想吃辣', polarity: '喜欢', confidence: 0.5 },
+        {
+          category: '过敏忌口',
+          key: '不吃辣',
+          value: '不吃辣',
+          polarity: '拒绝',
+          confidence: 0.9,
+        },
+      ],
+      memAvoid,
+    ).decision === 'confirmation_required',
+    '同轮既有忌口又有改口 → 以改口为准去问，不静默写忌口',
+    decideMemoryAction(
+      [
+        { category: '口味', key: '辣', value: '想吃辣', polarity: '喜欢', confidence: 0.5 },
+        {
+          category: '过敏忌口',
+          key: '不吃辣',
+          value: '不吃辣',
+          polarity: '拒绝',
+          confidence: 0.9,
+        },
+      ],
+      memAvoid,
+    ).decision,
   );
 
   return results;

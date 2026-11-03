@@ -648,7 +648,15 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 
 - 忌口**只认本轮原话**：`prefs.avoid` 有值**且** `extractPrefsFromText(本轮原话)` 也抽得出忌口才记「过敏忌口」，polarity=拒绝，confidence 0.9。
   `prefs.avoid` 常常只是回声（`recentUserText` 抽最近 4 轮），拿回声当新事实会每轮重写一条用户这轮没提的忌口，还会绕过冲突判定
-- 消息含长期副词（`一直\|平时\|一般\|通常\|以后\|从来\|总是\|都`）**且** 命中 `喜欢\|爱吃\|偏好\|钟爱` → 才记口味，confidence 0.6
+- **对上一轮推荐的抱怨不算忌口**（2026-11-03 补）：`PICK_REFERENCE_PATTERN`（这些 / 这个 / 它 / 你推的…）**且** `SPICY_DENIAL_PATTERN`（不辣 / 不够辣 / 没辣味…）同时命中时，`factsFromMessage` 直接返回空。
+  「这些也不辣」说的是"你推的不对"，不是"我不吃辣"；此前被抽成 `avoid='不吃辣'` 写进长期记忆，
+  下一轮用户的明确要辣被自己的忌口挡死，只能回「这个条件有点刁钻」——越抱怨越吃不到。
+  例外：同句带长期副词（"这些也不辣，我平时都喜欢吃辣的"）仍照常记，那是真在说偏好。
+  配套收窄 `NO_SPICY_PATTERN`：去掉裸 `不辣`，只认「不辣就行 / 不辣的那种」这种点单式说法
+- 消息含长期副词（`一直\|平时\|一般\|通常\|以后\|从来\|总是\|都(?:喜欢\|爱\|吃\|喝)`）**且** 命中 `喜欢\|爱吃\|偏好\|钟爱` → 才记口味，confidence 0.6。
+  `都` 必须跟吃 / 喝 / 喜欢——"这些都不辣"里的 `都` 是范围副词，算进长期语气就会让抱怨句混进记忆
+- **`decideMemoryAction` 只看 `facts[0]`**（2026-11-03 修正）：忌口早退分支由 `facts.find(...)` 改为只判第一条。
+  以前只要本轮任何一条事实是忌口就直接写，把同轮 `unshift` 到最前面的"改口"静默吞掉：忌口照写、pending 不挂、确认话术不问
 - **冲突事实优先**：本轮想要的口味（`prefs.flavor`）在记忆里撞上忌口（「不吃辣」vs「想吃辣」；过敏不参与，死命令没有改口）→ 冲突事实 `unshift` 到 facts[0]，交 `decideMemoryAction` 挂待确认。
   该分支**不看**「本轮有没有抽出别的事实」——2026-11-01 的门槛 `!out.length` 把"我平时都喜欢吃辣的"这种真正的改口挡在门外，已废。
   用户本轮亲口重申同一个忌口（`restatedAvoid`）不算改口，不挂待确认
@@ -889,13 +897,26 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 | 大脑侧 | 输出格式新增 `preferences.category`，数学模型漏抽时本地这层兜底 |
 | `buildQuery` | 输出 `category_terms`（品类标签）和 `name_terms`（原话里的钩子词 + 口味），后者是为了揪出"点名了哪一款" |
 | `retrieve` | `score = 普通命中 + 品类命中×3 + 名字命中×5 − 负向命中×2`。品类是硬需求，不能被场景/情绪的软命中挤下去 |
-| `rank` | 排序还得再加 bonus，否则候选捞对了、最后仍被质量分/毛利翻盘：`categoryBonus +25`（同品类）`nameBonus +18`（名字命中） |
+| `rank` | 排序还得再加 bonus，否则候选捞对了、最后仍被质量分/毛利翻盘：`categoryBonus +25`（同品类）`nameBonus +18`（名字命中）`spicyBonus`（要辣时：中辣 +18 / 重辣 +14 / 微辣 +4，2026-11-03 补——没有它，「想吃辣的」会把黑胡椒薯角这类微辣款顶到前三） |
 | 门槛有约束 | 品类算 167988 的一类有效约束，"想吃坚果"因此不再走"信息不足先追问" |
 
 商品库侧同时修了一处错挂：`牛肉干` 的 taste_tags 去掉了 `坚果`——标签错挂会把"要坚果"的请求捞偏到肉干上。
 
 **卡片理由（`buildReasons`）**：到手价那一句删除了（推荐话术块会按同一份 plan 再说一遍，写两次是复读）；
 场景句与品类句都从第二句里剔出，三张卡的第二句不再复读同一句。
+
+**「冲着你要的辣味挑的」的辣度门槛（2026-11-03 收紧）**：`taste==='辣味'` 的佐证从 `spicy > 0` 提到 `spicy >= 2`——
+微辣只是"有个辣字"，拿它写这句话就是当面扯谎，用户咬一口就是「这些也不辣」。
+`spicy === 1` 的款单独诚实说「微辣，只能提个味（不算重辣）」，不许借用户的需求给它背书。
+
+**改口期不拿旧忌口挡新口味**：`buildNeed` 里若本轮 `taste_preference` 含「辣味」，
+则从 `avoid_tags` 里删掉「辣味」——两边都留着会得到自相矛盾的需求，硬过滤必然 0 候选。
+「不吃辣」是口味忌口（不是过敏），当面说"想吃辣的"本身就意味着改口，要不要真改交给 pending 追问，
+**本轮先按用户此刻说的来**；过敏原（花生 / 坚果 / 海鲜 / 乳制品）不在此列，死命令绝不为口味让路。
+
+**0 候选话术不再甩锅**：`needFollowUp(0)` 不再说「这个条件有点刁钻」（把锅甩给用户又说不清是哪条过分）。
+被口味卡住时直说"你要的这个口味这批里确实没有完全对得上的，换成微辣 / 中辣，还是换个味道"，
+其余情况说"这批里没有完全对得上的，换个口味或放宽点预算"。
 
 ### 7.1 时间上下文（`lib/llm/time-context.ts`，2026-10-31 补）
 
@@ -957,6 +978,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 
 | 日期 | 改动 | 涉及文件 |
 |---|---|---|
+| 2026-11-03 | **V1.5 四条防线修复（幻影忌口 / 冲突闭环 / 指鹿为马 / 「条件刁钻」）**：先查了提交与 diff —— V2.0 第 2 步 `236240b` 只换存储层（`decideMemoryAction` 是纯函数，注释明写"迁库时刻意一行没动"），第 3 步 `0fa32b1` 对 `handlers.ts` 只搬走 `normalizeUserId` 并 re-export，**均未改语义**；`local-workflow.ts` / `reply-composer.ts` / `patterns.ts` 自 `ae6a4ce` 起没动过。四条现场全部本地复现，根因都在 V1.5：① `NO_SPICY_PATTERN` 末尾的裸 `不辣` 把「这些也不辣」抽成 `avoid='不吃辣'` 写进长期记忆（用户越抱怨越吃不到辣）→ 收窄为只认"不辣就行 / 不辣的那种"式点单说法，并新增 `PICK_REFERENCE_PATTERN` + `SPICY_DENIAL_PATTERN`，抱怨句整轮不写记忆（带长期副词除外）② `decideMemoryAction` 的忌口早退用 `facts.find(...)`，把同轮 unshift 到 `facts[0]` 的改口静默吞掉（忌口照写、pending 不挂）→ 只判 `facts[0]` ③ `buildNeed` 里旧忌口与本轮"要辣"同时进 need（`taste=['辣味']` + `avoid=['辣味']`），硬过滤必然 0 候选 → 改口期删掉矛盾的 `avoid`，本轮按用户明说给货 ④ `rank` 无辣度加分、`buildReasons` 用 `spicy>0` 就给微辣款写"冲着你要的辣味挑的"→ 加 `spicyBonus`（中辣 18 / 重辣 14 / 微辣 4），理由门槛提到 `spicy>=2`，微辣改说"只能提个味" ⑤ `needFollowUp(0)` 不再说「条件有点刁钻」，按"被口味卡住 / 其他"分开说人话。测试：`profile-guard` +7、`reco-guard` +6（`verify` **82/82**），`npm run guard` 全过，`smoke` **137/137** | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `scripts/profile-guard.ts` / `scripts/reco-guard.ts` / `系统prompt汇总.md` |
 | 2026-11-03 | **V2.0 鉴权接进前端（只新增了限流与账号区话术，规则本体未动）**：① 流式入口新增 **429 分支**——用服务端返回的 `error` 原话，默认兜底「慢点，一口气说太多了，缓一下再聊」；**不落**「啊？刚卡了一下」那条通用错误，也**不降级重发**（重发正好把限流撞得更死）② 「我的」抽屉新增「账号」区与注册/登录弹窗文案：游客态「你现在是游客，记住的东西只跟着这台浏览器走，清缓存就没了」、注册页「现在记住的忌口、口味都会跟着走，换手机也不丢」、登录页「登录后接着用你原来的记忆，一件不落」；注册走**游客 id 原地升级**（不新建账号），所以这些承诺是真的 ③ 提示词正文、意图正则、记忆抽取**均未改动** | `app/page.tsx` / `app/_components/use-auth.ts`（新增）/ `app/_components/auth-dialog.tsx`（新增） |
 | 2026-11-03 | **P1+P2+P3 收口（规则没变，搬了位置、立了基线）**：① **前端文案搬家**——`WELCOME` / `SCENES` / `QUICK` / `BUDGETS` / `PROFILE_TRUSTED_KEYS` 从 `app/page.tsx` 移到 `app/_components/constants.ts`，`page.tsx` 只留组装 + 报错兜底文案（"啊？刚卡了一下" / "啊？网断了"），本节 §6 的「文件」口径已按此更新；改开场白/场景/快捷短语请去 `constants.ts`，别再翻 `page.tsx`。② **格式化基线**：`.prettierrc` 改 `singleQuote: true`（对齐既有代码，避免全仓引号大改），`.prettierignore` 排除 `*.md`（手写中文表格格式化只制造噪声）；`format:check` 由 56 个文件不通过 → 全绿。③ **lint 清干净**：删掉搬走后留在 `local-workflow.ts` / `index.ts` / `brain-stream.ts` 的死引用，未用形参改 `_plan` / `_query` / `_reason` 并注明为何保留（对齐 Coze 节点入参），`npm run lint` 0 error 0 warning。④ **单测**：`tests/*.test.ts` 69 条（admin 票据 12 + profile-guard 35 + reco-guard 22），断言仍只在 `scripts/*-guard.ts` 写一份，`GuardResult` 定义在 `scripts/guard-types.ts`，`npm run verify` = `tsc --noEmit && vitest run` | `app/_components/*` / `app/page.tsx` / `eslint.config.mjs` / `vitest.config.ts` / `.prettierrc` / `.prettierignore` / `tests/*` / `scripts/guard-types.ts` / `lib/llm/{index,brain-stream,local-workflow}.ts` / `lib/memory/store.ts` |
 | 2026-11-03 | **记忆删除正则补正向偏好 + 气泡不再列商品明细**：① `MEMORY_KEYWORD_PATTERN` 去掉末尾的 `喜欢[^，。！？\s]{1,6}` 兜底——它把「忘掉我喜欢辣味」抠成「喜欢辣味」，`deleteMemory` 的 `includes` 比不中记忆里的「辣味」，于是回"你要我忘掉哪条"；改为**只列偏好对象本身**（忌口 / 口味 / 口感 / 预算档，含 `海产品过敏` `牛奶过敏` 新库口径与 `30元内/30-60元/60元以上`），单字 `辣/甜/咸/酸/脆/软` 垫底保证 `includes` 两边都能中；正向说法（喜欢/爱吃/爱喝/偏爱）交给新增的 `MEMORY_LIKE_PATTERN`，只取动词后面的宾语。`extractMemoryKeyword` 改为「白名单优先 → 动词兜底」两段。② `composeRecommendReply` **不再往气泡里排 `1. XX｜X元` 明细**（明细归卡片）：新增 `sanitizeTransition()`——先按行截掉模型自己写的清单，再按句切掉带价格的句子与 `META_INSTRUCTION_PATTERN`（"你先说句随便""如果…我就…"这类把内部 CONSENT 判定讲给用户听的话），切光落兜底过渡语「行，换个方向给你挑——」；⚠ 风险行只留不带价的事实（含过敏原 / 辣度），"略超预算"与凑单句交给卡片；主推/备选建议去掉价格。两条 route（普通 + SSE）都在 `guardReply` 之前过一遍清洗。③ 守卫：`profile-guard` 新增 8 条删除关键词断言（含"忘掉薯片"兜底与"忘掉吧"反向对照），`reco-guard` 新增【文案】9 条（把事故原句喂进去断言无编号/无价格/不留空气泡，另加"正常过渡语原样保留"的反向对照），smoke 新增第 35/36 节 | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/llm/reply-composer.ts` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `scripts/profile-guard.ts` / `scripts/reco-guard.ts` / `scripts/smoke.mjs` |

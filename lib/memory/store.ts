@@ -435,7 +435,16 @@ export function decideMemoryAction(
     };
   }
 
-  const hard = facts.find((f) => f.category === '过敏忌口' && f.polarity === '拒绝');
+  /**
+   * 只看 facts[0]：冲突事实会被 `factsFromMessage` 特意 unshift 到最前面，
+   * 它代表的"改口"必须优先于同轮顺带提到的忌口。
+   *
+   * 以前这里是 `facts.find(...)` —— 只要本轮任何一条事实是忌口就直接写，
+   * 哪怕用户正说着"我想吃辣的"。结果"改口"被静默吞掉：忌口照写、pending 不挂、
+   * 确认话术不问，用户下次要辣又被自己的旧忌口挡住。
+   */
+  const first = facts[0];
+  const hard = first.category === '过敏忌口' && first.polarity === '拒绝' ? first : null;
   if (hard) {
     return {
       ...empty,

@@ -297,6 +297,19 @@ export function buildNeed(input: LocalWorkflowInput): Need {
   }
   memoryAvoidTags(memory).forEach((t) => avoid.add(t));
 
+  /**
+   * 本轮明说要辣，就别再拿旧忌口把"辣味"一起躲掉。
+   *
+   * 两边都留着会得到 `taste=['辣味']` + `avoid=['辣味']` 的自相矛盾需求，
+   * `hardFilter` 把辣款全踢光 → 0 候选 → 回一句"这个条件有点刁钻"。
+   * 用户明明说了想吃什么，系统却把它当成不讲理的要求。
+   *
+   * "不吃辣"是口味忌口（不是过敏），当面说"想吃辣的"本身就意味着改口；
+   * 要不要真改由记忆层的 pending 追问决定，**本轮先按用户此刻说的来**。
+   * 过敏原（花生/坚果/海鲜/乳制品）不在此列——那是死命令，绝不为口味让路。
+   */
+  if (taste.has('辣味')) avoid.delete('辣味');
+
   const scene = (prefs.scene || '').trim();
   const gift_need = /送礼|送人|送朋友|送客户|送同事|伴手礼/.test(message);
 
@@ -440,6 +453,23 @@ export function rank(
     const categoryBonus = need.category_preference.some((c) => p.category.includes(c)) ? 25 : 0;
     // 点了名这一款（"来点薯片"），名字命中的直接顶到第一
     const nameBonus = query.name_terms.some((t) => p.name.includes(t)) ? 18 : 0;
+    /**
+     * 辣度匹配：用户要辣时，中辣(2)最合适，重辣(3)次之，微辣(1)只能算"有个辣字"。
+     *
+     * 不加这一段的话，「想吃辣的」会把黑胡椒薯角（微辣）这种 quality/毛利高的款
+     * 顶到前三——它们标签里确实有"辣"，但用户咬一口就知道不辣，
+     * 接着就是"这些也不辣"的质疑。实测就是这么翻车的。
+     */
+    const wantsSpicy = need.taste_preference.includes('辣味');
+    const spicyBonus = wantsSpicy
+      ? p.spicy === 2
+        ? 18
+        : p.spicy === 3
+          ? 14
+          : p.spicy === 1
+            ? 4
+            : 0
+      : 0;
     // 时段对得上才推：白天把"深夜"场景的款压下去（用户明说熬夜/夜宵除外），夜里反过来给点优势
     const nightScene = p.scenes.includes('深夜');
     const timeBonus =
@@ -463,7 +493,8 @@ export function rank(
         riskScore +
         categoryBonus +
         nameBonus +
-        timeBonus,
+        timeBonus +
+        spicyBonus,
     );
 
     return {
@@ -537,11 +568,20 @@ function buildReasons(p: Product, need: Need, _plan: PricePlan): string[] {
   // 口味理由必须落到商品自己身上：要辣得真辣，要甜/咸/酸/清淡得 taste_tags 真有。
   // 否则就会出现"不辣的雪饼，理由写冲着你要的辣味挑的"这种指鹿为马。
   const tasteWords = (need.taste_preference || []).filter((t) => HARD_TASTE_WORDS.has(t));
+  /**
+   * 辣味门槛是 `>= 2`：微辣(1)只是"有个辣字"，拿它写"冲着你要的辣味挑的"
+   * 就是当面扯谎——用户下一句必然是"这些也不辣"。
+   * 微辣的款单独诚实交代一句，放下面。
+   */
   const realTaste = tasteWords.filter((t) =>
-    t === '辣味' ? p.spicy > 0 : p.taste_tags.some((x) => x.includes(t)),
+    t === '辣味' ? p.spicy >= 2 : p.taste_tags.some((x) => x.includes(t)),
   );
   const tags = realTaste.filter((t) => t !== need.scene && !need.category_preference.includes(t));
   if (tags.length) out.push(`冲着你要的${tags.slice(0, 2).join('、')}挑的`);
+  // 要辣却只有微辣：给就得说清楚，别让"冲着你要的辣味"替它背书
+  if (!tags.includes('辣味') && tasteWords.includes('辣味') && p.spicy === 1) {
+    out.push('微辣，只能提个味（不算重辣）');
+  }
 
   // 场景是软偏好，不强求商品带场景标签：带就写专属句；不带就诚实说"不一定是专属但吃着也爽"
   if (need.scene) {
@@ -675,10 +715,15 @@ export function recommendIntake(
  * 167988 的另一半：检索排序之后，够格商品不足 3 款时引导放宽条件。
  * 约束不足的追问已前移到 recommendIntake，这里只管"条件太刁钻没货"。
  */
-export function needFollowUp(qualifiedCount: number): string | undefined {
+export function needFollowUp(qualifiedCount: number, tasteBlocked = false): string | undefined {
   // 有货就出卡片，别为凑 3 张硬推不想要的；一款都没有才追问
   if (qualifiedCount >= 1) return undefined;
-  return '这个条件有点刁钻，换个口味或放宽点预算我再找？';
+  // "条件刁钻"这四个字把锅甩给用户，而且含糊——用户根本不知道自己哪条要求过分。
+  // 分开说：被口味卡住就直说这批货没有对得上的，其余按预算/库存说明。
+  if (tasteBlocked) {
+    return '你要的这个口味这批里确实没有完全对得上的，换成微辣/中辣，还是换个味道我再找？';
+  }
+  return '这批里没有完全对得上的，换个口味或放宽点预算我再找？';
 }
 
 /** 整条链路：需求 → 检索 → 硬过滤 → 排序 → 合规 */
@@ -735,7 +780,8 @@ export function runLocalWorkflow(input: LocalWorkflowInput): LocalWorkflowResult
     candidates,
     filtered_out: allFiltered,
     recommendations: ranked,
-    follow_up: needFollowUp(ranked.length),
+    // 被口味卡住时（"要辣的"但全库只剩微辣/不辣），追问话术要说人话
+    follow_up: needFollowUp(ranked.length, hasTasteWant),
     shortfall_note,
   };
 }

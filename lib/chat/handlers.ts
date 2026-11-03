@@ -22,7 +22,9 @@ import {
   INSIST_PATTERN,
   INTRODUCE_PATTERN,
   NIGHT_PATTERN,
+  PICK_REFERENCE_PATTERN,
   RETRACTION_PATTERN,
+  SPICY_DENIAL_PATTERN,
 } from '@/lib/rules/patterns';
 import type { ChatMessage, Filters } from '@/lib/llm';
 import {
@@ -856,7 +858,27 @@ export function factsFromMessage(
   // 「这轮原话抽得出忌口吗」交给 extractPrefsFromText 答——不另立一份拒绝词表。
   const statedAvoid = extractPrefsFromText(message).avoid;
   const avoid = (prefs.avoid || '').trim();
-  if (avoid && avoid !== 'null' && statedAvoid) {
+  /**
+   * 对上一轮推荐的质疑（"这些也不辣"）不是忌口声明。
+   *
+   * 实测事故：用户嫌推的不够辣，说了句"这些也不辣"，被抽成 `avoid='不吃辣'`
+   * 记进长期记忆；下一轮再要辣，`buildNeed` 把"辣味"同时塞进 `taste_preference`
+   * 和 `avoid_tags`，硬过滤把辣款全踢光，回一句"这个条件有点刁钻"。
+   * 越抱怨越吃不到，闭环彻底反了。
+   */
+  const complainingAboutPicks =
+    PICK_REFERENCE_PATTERN.test(message) && SPICY_DENIAL_PATTERN.test(message);
+  // "都"必须跟"吃/喝/喜欢"才算长期语气："这些都不辣"里的"都"是范围副词，
+  // 把它当长期偏好信号，抱怨句就又能混进记忆
+  const longTerm = /一直|平时|一般|通常|以后|从来|总是|都(?:喜欢|爱|吃|喝)/.test(message);
+
+  // 纯评价句（"这些也不辣"）整轮都不写记忆：它评价的是上一轮的货，不是用户的长期偏好。
+  // 只排掉忌口是不够的——prefs 里带着上一轮的 flavor 回声，会顺势判成"改口要辣"，
+  // 然后弹出"你之前说过不吃辣，现在改口？"这种驴唇不对马嘴的确认。
+  // 带长期副词的（"这些也不辣，我平时都吃重辣"）例外，那是真在说偏好。
+  if (complainingAboutPicks && !longTerm) return out;
+
+  if (avoid && avoid !== 'null' && statedAvoid && !complainingAboutPicks) {
     out.push({
       category: '过敏忌口',
       key: avoid,
@@ -866,7 +888,6 @@ export function factsFromMessage(
     });
   }
 
-  const longTerm = /一直|平时|一般|通常|以后|从来|总是|都/.test(message);
   const like = message.match(/(?:喜欢|爱吃|爱|偏好|钟爱)([^，。！？\s]{1,6})/);
   if (longTerm && like && like[1]) {
     out.push({
