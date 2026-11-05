@@ -172,10 +172,16 @@ export async function recallMemory(
   _query: string = '零食偏好',
   limit: number = 20,
 ): Promise<RecalledMemory> {
-  // 只取这个用户最近 limit 条：聊了几个月的用户记录会很长，
+  // 只取这个用户最近 limit 条**有效**记忆：聊了几个月的用户记录会很长，
   // 真正影响当前推荐的往往只有最近那几条，注入上限在 renderMemoryForPrompt 里再收一次。
+  //
+  // ⚠️ deleted / superseded 必须在查询里排除（2026-11-05 外审 P0）：以前是
+  // `take: limit` 后再在内存里过滤状态——用户一旦攒了 20+ 条废弃记忆
+  // （改口味连环、删偏好都会产生），这 20 个名额全被废弃数据占满，
+  // 「不吃辣」这类长期偏好被挤出结果集，AI 当场"失忆"。
+  // 把状态过滤下推到查询，limit 只作用于有效数据。
   const rows = await prisma.memory.findMany({
-    where: { userId },
+    where: { userId, status: { notIn: ['deleted', 'superseded'] } },
     orderBy: { updatedAt: 'desc' },
     take: Math.max(1, limit),
   });

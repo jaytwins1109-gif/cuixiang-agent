@@ -95,6 +95,16 @@
 | 11-05 02:15 | 回归 | `verify` / `guard` / `lint` / `format:check` | 116/116；profile-guard 63(+3)、reco-guard 41(+6)；lint 0/0；format 全绿 | ✅ | |
 | 11-05 02:20 | 回归·端到端 | `npm run smoke`（+§37 否定场景 2 条） | **164/164（0 FAIL）** | ✅ | |
 
+### 2026-11-05（三）终审：记忆召回截断专项
+
+| 测试时间 | 测试模块 | 场景 | 系统表现 | 是否通过 | 备注/排查线索 |
+|---|---|---|---|---|---|
+| 11-05 03:05 | DB 探针·证伪 | 25 条 superseded（updatedAt 更新）+ 1 条 active + 1 条 pending，`recallMemory(limit=20)` | 修前 `core_profile=[]`、`pending_fragments=[]`——废弃数据占满 take:20 窗口 | ❌→✅ | 外审 P0 成立；探针数据必须让废弃记录比有效记忆**新**（真实场景：改口味连环不断产生新废弃） |
+| 11-05 03:06 | DB 探针·验证 | 同上 | 修后 core_profile 含「不吃辣」、pending 正常召回 | ✅ | 修复：`where: { userId, status: { notIn: ['deleted','superseded'] } }`；探针用完即删 |
+| 11-05 03:07 | 身份签发核实 | 逻辑审查 | `resolveIdentity` 已有"票据对得上就不重发"早退（identity.ts:53）；真签发只发生在首次/过期/换id | ✅ 无需改逻辑 | 外审"每请求重签发"不成立；按建议补 trace 打点，线上刷屏=前端 cookie 没落住 |
+| 11-05 03:08 | 回归 | `verify` / `lint` / `format:check` | 116/116；lint 0/0；format 全绿 | ✅ | |
+| 11-05 03:15 | 回归·端到端 | `npm run smoke` | **164/164（0 FAIL）** | ✅ | P0 修复未破坏任何现有断言 |
+
 ### 2026-11-02「移动端 UI 兼容性 + 两个脚本实测」专项
 
 | 测试时间 | 测试模块 | 用户输入 | 系统表现 | 是否通过 | 备注/排查线索 |

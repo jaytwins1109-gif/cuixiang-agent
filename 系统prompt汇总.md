@@ -625,7 +625,10 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 
 **注入量上限**（防长期用户把 system 撑爆、拖慢首字响应）：
 
-- `recallMemory` 返回前按 `updated_at` 倒序排好（新记忆在前）
+- `recallMemory` 返回前按 `updated_at` 倒序排好（新记忆在前）。
+  **deleted / superseded 在查询层就排除**（`status: { notIn: [...] }`，2026-11-05 外审 P0）：
+  以前是 `take: limit` 后在内存里过滤状态——废弃记忆攒够 20 条就把 active 的长期偏好
+  （"不吃辣"）挤出结果集，AI 当场"伪失忆"。limit 现在只作用于有效数据
 - 核心画像全量注入（稳定偏好条数极少）；场景偏好最多 `MAX_SUMMARY_INJECT = 5` 条、零散记录最多 `MAX_FRAGMENT_INJECT = 3` 条
 - 被截掉的会补一句「（还有 N 条更早的）」，让大脑知道没看全、别当成"没有"
 
@@ -1020,6 +1023,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 
 | 日期 | 改动 | 涉及文件 |
 |---|---|---|
+| 2026-11-05 | **终审：记忆召回截断漏洞（P0）+ 身份签发打点（P1）**：① `recallMemory` 的 `where` 下推状态过滤（`status: { notIn: ['deleted','superseded'] }`）——原 `take: limit` 先截断后过滤，废弃记忆攒满 20 条就把 active 长期偏好挤出结果集（伪失忆）；一次性 DB 探针证伪/验证（25 条**比有效记忆新**的 superseded + 1 条 active + 1 条 pending，limit 20：修前 core/pending 全空，修后全召回，用完即删）② `resolveIdentity` 票据签发**已有"对得上就不重发"早退**（外审"每请求都签发"不成立），按建议在真签发路径（首次/过期/换id）加 trace 打点——线上这条日志刷屏 = 前端 cookie 没落住，不是签发逻辑的锅。schema.prisma / jwt.ts 核实无需改动 | `lib/memory/store.ts` / `lib/auth/identity.ts` / 本文件 §4.2 |
 | 2026-11-05 | **核心链路外审 5 处（P0×3 + P1×2）**：① `handlePendingConfirmation` 否定开头答复一律本地按"否"办结（二次修正 10-31 的放行决策——放行导致 pending 挂死循环；删 `isRetraction`，`PENDING_NO_PATTERN` 锚定 `^` 保证句中"不是"不误拦）② 删 `requestOnce` 的进程级 `blankStreak` Map——一个用户赶上空白、全体用户跟着降级自由文本；改为只看当前调用 attempt 0/1 ③ `extractPrefsFromText` 场景抽取加否定闸（`sceneHit` 回看前文 4 字内 `不想/不去/别去/没去/再也不/不在` 不抽）④ `page.tsx` final 比 delta 短（嘴瓢被剪）时纯文本轮垫"哎呀刚才嘴瓢了，重说——"+ 挂 `refreshed` 淡入（阈值 -6 防微差触发）⑤ `CATEGORY_WORDS` 补宽（虾条/雪饼/蛋卷/卤味/螺蛳粉/小鱼干/棉花糖/开心果等 20+ 常见口语句；链路 `allowRecommend → mentionsGoods` 本来就通，外审举例的"饼干"原在表中）。守卫 +9（场景否定闸正反 4 + mentionsGoods 2 + PENDING_NO 锚定 3）、smoke +2（否定场景端到端） | `lib/chat/handlers.ts` / `lib/llm/index.ts` / `lib/llm/category-words.ts` / `app/page.tsx` / `scripts/reco-guard.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / 本文件 §3.2 §4.5 §5.3 |
 | 2026-11-05 | **外审 6 处修复（脏话拦截废除 / 删除关键词洗"的" / CONSENT 放宽 / 档位示例对齐 / 2 处核实已达标）**：① `PROFANITY_PATTERN` 整个删除（正则 + `sanitizeModelReply` / `settleChatReply` 两处引用）——用户骂脏话是情绪宣泄，本地拦截等于规训用户；人设第 127 行"模型自己不说脏话"的红线保留 ② `extractMemoryKeyword` 兜底捕获洗掉开头的"的"——「忘掉我**的**薯片」→「的薯片」，`includes` 永远落空（白名单用例盖不住：带白名单词的会被先截走） ③ `CONSENT_PATTERN` 放宽：语气词 `*`、允许短尾巴，"好的，来点""行，随便"算点头；有转折/新内容（"好啊那我不买了"）仍不算 ④ `describeConstraint` 示例"辣味 + 10元内"→"30元内"（V2.0 换库后的上下层脱节） ⑤ **核实已达标**：`RECOMMEND_PITCH_PATTERN` 只在完整 reply 上跑（`brain-stream.ts` A/B/C 分层，delta 阶段仅结构级抽取+零宽清洗）；chat 意图在 `routeIntent` 本地分流走 `runChatChain`（`buildChatPrompt` + 纯文本无 json_object），主 prompt 的 JSON schema 只进推荐/介绍链路，第七节已补分流说明。守卫 +8（删除关键词带"的"用例、CONSENT 正反 7 例）、smoke +1（带尾巴点头接上推荐）。⚠ 顺带发现文档 §3.4 等处仍是旧档位"10元内/10-30元"（V2.0 换库时的文档债，真源 `system-prompt.ts` 已是三档） | `lib/rules/patterns.ts` / `lib/llm/index.ts` / `lib/chat/handlers.ts` / `lib/prompts/system-prompt.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / 本文件 §4.4 §5.1 §7 |
 | 2026-11-04 | **改口味连环 Bug：同维度互斥 + 改口味追问场景 + 找补话术**：截图现场「不想吃辣了，想吃甜的」暴露三层问题，全部先复现后修——① `syncMemory` 写忌口时对旧口味零信号 → 新增 `supersedeTasteConflicts(userId, axis)`，忌口落库即作废同轴 `polarity='喜欢'` 旧偏好（轴由 `avoidAxisOf` 从忌口原话抠；过敏原不含轴字天然不触发；限定 polarity 是防「不吃辣」按包含匹配把自己也废掉）② `TASTE_PIVOT_PATTERN` 改口味轮历史场景作废，场景必须本轮重说，否则追问「这次是什么场合吃」（普通要口味不误伤）；`SCENE_COMPLAINT_PATTERN` 命中先认错「我的锅，忘了问你在哪儿吃——」，chat 支路两个 AI 入口统一接 `apologizeForMissedScene`，模型已认错则不垫 ③ 前端 `mergeProfileExclusive` 替代裸 spread（口味与忌口同轴互斥，过敏原永不误伤）；`pickTrustedProfile` 回包同轴互斥拦模型回声。**方向单向**：忌口→口味直接办（用户明说），口味→忌口必须 pending 确认。验证：DB 探针 8/8、`verify` **99/99**、guard 全过、lint/format 全绿、`smoke` **150/150**（新增 14b 连环 12 条） | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `app/_components/storage.ts` / `app/page.tsx` / 两个 AI 入口 / `scripts/{profile,reco}-guard.ts` / `scripts/smoke.mjs` / 本文件 §4.4 §7 |

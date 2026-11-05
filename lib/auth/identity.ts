@@ -24,6 +24,7 @@ import {
   verifyUserToken,
 } from './jwt';
 import { normalizeUserId } from './user-id';
+import { tracePrefix } from '@/lib/chat/trace';
 
 export type IdentitySource = 'token' | 'guest-header' | 'new-guest';
 
@@ -48,12 +49,21 @@ export async function resolveIdentity(req: NextRequest): Promise<Identity> {
   const source: IdentitySource = headerRaw ? 'guest-header' : 'new-guest';
   const userId = normalizeUserId(headerRaw);
 
-  // 3) 票据自检：对得上就不重发，对不上（没票 / 换了 id / 过期）就签一张新的
+  // 3) 票据自检：对得上就不重发，对不上（没票 / 换了 id / 过期）就签一张新的。
+  //    正常浏览器一次签发后随 Set-Cookie 落住，之后每请求都走上面的"对得上"早退——
+  //    签发只发生在首次 / 过期 / 换 id，不是高频热路径。
+  //    打点日志（2026-11-05 外审建议）：若线上这条日志刷屏，说明前端 cookie 没落住
+  //    或有人在无 cookie 客户端裸奔，那是前端问题，别拿重签发逻辑背锅
   const ticketGuest = await verifyGuestTicket(req.cookies.get(GUEST_COOKIE)?.value);
   if (ticketGuest === userId) {
     return { userId, isGuest: true, source };
   }
 
   const guestTicket = await signGuestTicket(userId).catch(() => undefined);
+  if (guestTicket) {
+    console.log(
+      `${tracePrefix()}[Identity] 补发游客票据 uid=${userId} source=${source}（首次/过期/换id）`,
+    );
+  }
   return { userId, isGuest: true, source, guestTicket };
 }
