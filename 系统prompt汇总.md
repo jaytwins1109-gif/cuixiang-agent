@@ -252,6 +252,12 @@ intent = "chat" 是默认，包括：
 - intent = recommend：reply 写过渡语（也可以直接写推荐铺垫），preferences 尽量填全
 - intent = introduce：必须填 product_name，reply 写介绍文案
 
+> **JSON 约束不碰陪聊（2026-11-05 外审核实）**：这份 schema 只注入推荐 / 介绍链路。
+> 用户没开口要东西时，`routeIntent` 在调用模型**之前**就分流到纯文本陪聊链路
+> （`buildChatPrompt`，无 json_object、不注商品库），陪聊语气不受这里的 JSON 影响；
+> 保留 chat 选项是因为结构化链路内模型仍可能把意图纠成 chat（"判 recommend 但没开口要"的降级路），
+> 那条路最后也会经 `settleChatReply` 重写回纯文本。
+
 **注意：判断不出就填 null，不要留空字符串，也不要整个 preferences 省略。**
 
 - **预算只认两档，没提就填 null**：preferences.budget 只能在 10元内 / 10-30元 里选。
@@ -368,7 +374,7 @@ HTTP 报错（`!res.ok`）不重试——额度、鉴权这类问题不会自己
 | `BUY_PATTERN` | `推荐\|推个\|来个\|来点\|来份\|来一[袋包盒份]\|整点\|整一\|想吃\|要吃\|吃点\|买点\|买个\|买一\|带点\|有啥好吃\|有什么好吃\|好吃[的]?推荐\|挑点\|挑个\|选点\|来点吃\|什么吃的\|啥吃的\|看看有` | 明确开口要 |
 | `ADJUST_PATTERN` | `太贵\|便宜\|换[一个批]\|不要\|不吃\|不想吃\|有别[的]\|别的\|其他\|另外\|过敏\|除了\|有没有` | 推荐上下文里改条件 |
 | `INTRODUCE_PATTERN` | `啥样\|什么样\|怎么样\|介绍一下\|介绍下\|讲讲\|说说\|是什么\|怎么吃\|好吃吗\|啥味道` | 在打听具体商品 |
-| `CONSENT_PATTERN` | `随便\|都行\|都可以\|都好\|你看着[办选]\|听你的\|^(好\|要\|行\|来\|ok\|OK)(啊\|呀\|吧\|的\|哦\|啦)?[!！。.,，]?$` | **只在推荐上下文里**算点头放行 |
+| `CONSENT_PATTERN` | `随便\|都行\|都可以\|都好\|你看着[办选]\|听你的\|^(好\|要\|行\|来\|ok\|OK)(啊\|呀\|吧\|的\|哦\|啦)*[\s,，。.]*(来点\|随便\|都行\|都好\|你看着办)?[!！。.,，]?$` | **只在推荐上下文里**算点头放行；2026-11-05 放宽——允许语气词连用与短尾巴（"好的，来点""行，随便"），有转折 / 新内容的整句（"好啊那我不买了"）仍然不算 |
 | `mentionsGoods()` | `lib/llm/category-words.ts`：`CATEGORY_TRIGGERS` 命中即算"在要货"（排除含"过敏/不吃/不想吃/戒/忌"的反向说法） | 补上"没说『来点/推荐』但说清了要什么"（"有没有巧克力"），这条路以前会被降级成陪聊 |
 
 **想要辣的说法（`extractPrefsFromText`）**
@@ -553,7 +559,7 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 | 正常说话 | 原样出去（只把"您"改成"你"） |
 | 半句在夸海口（"行，我给你挑了三样：…"） | `stripPitchSentences` 按句裁掉许诺那几句，留着接住人的部分 |
 | 整句都在夸海口 | 按 `CHAT_NO_PITCH_HINT` 让模型**自己重写一次**；重写失败才落池 |
-| `INTERNAL_LEAK_PATTERN` / `PROFANITY_PATTERN` | 改词救不回来 → 落 `COMPANION_POOL`（底线，不商量） |
+| `INTERNAL_LEAK_PATTERN` | 改词救不回来 → 落 `COMPANION_POOL`（底线，不商量）。脏话红线已从本地拦截中移除（见下） |
 | 压根没拿到正文 | 落 `COMPANION_POOL`（不能让空气泡出去） |
 
 > **防线一道没拆**：许诺照剪、红线照拦、卡片与忌口的硬闸（`cardBlocked` / `guardReply` / `stripFakeList`）
@@ -730,8 +736,11 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 `includes` 比不中，就回"你要我忘掉哪条，我不猜"，用户明明说了要忘却被当成没说清。
 
 「喜欢辣味」「爱吃甜的」「喜欢嚼感」这类正向说法，靠白名单直接命中偏好对象；
-白名单一个都没认出来时才走 `MEMORY_LIKE_PATTERN`（`(?:喜欢|爱吃|爱喝|偏爱|偏好|最?爱|就好|就爱|只吃|只爱)(?:吃|喝)?(.{1,6})`），
+白名单一个都没认出来时才走 `MEMORY_LIKE_PATTERN`（`(?:喜欢|爱吃|爱喝|偏爱|偏好|最?爱|就好|就爱|只吃|只爱)(?:吃|喝)?([^，。！？\s]{1,6})`），
 只取动词后面的宾语（「忘掉我喜欢薯片」→ 薯片），绝不把「喜欢」带出去。
+**捕获结果开头的"的"要洗掉**（2026-11-05 外审修，`extractMemoryKeyword` 里 `.replace(/^的/, '')`）：
+「忘掉我**的**薯片」正则从动词后捕获，得到「的薯片」——`includes` 匹配库里任何记录都落空，
+用户明明说了要忘、系统却回"你要我忘掉哪条"。白名单用例盖不住这个组合（"辣味"会被白名单先截走）。
 
 > 单字 `辣/甜/咸/酸/脆/软` 是刻意留的：记忆里可能存的是「辣味」也可能是「辣的」，
 > `deleteMemory` 用 `includes` 匹配，单字两边都能中。反过来说，`辣味` 必须排在 `辣` 前面，
@@ -1005,6 +1014,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 
 | 日期 | 改动 | 涉及文件 |
 |---|---|---|
+| 2026-11-05 | **外审 6 处修复（脏话拦截废除 / 删除关键词洗"的" / CONSENT 放宽 / 档位示例对齐 / 2 处核实已达标）**：① `PROFANITY_PATTERN` 整个删除（正则 + `sanitizeModelReply` / `settleChatReply` 两处引用）——用户骂脏话是情绪宣泄，本地拦截等于规训用户；人设第 127 行"模型自己不说脏话"的红线保留 ② `extractMemoryKeyword` 兜底捕获洗掉开头的"的"——「忘掉我**的**薯片」→「的薯片」，`includes` 永远落空（白名单用例盖不住：带白名单词的会被先截走） ③ `CONSENT_PATTERN` 放宽：语气词 `*`、允许短尾巴，"好的，来点""行，随便"算点头；有转折/新内容（"好啊那我不买了"）仍不算 ④ `describeConstraint` 示例"辣味 + 10元内"→"30元内"（V2.0 换库后的上下层脱节） ⑤ **核实已达标**：`RECOMMEND_PITCH_PATTERN` 只在完整 reply 上跑（`brain-stream.ts` A/B/C 分层，delta 阶段仅结构级抽取+零宽清洗）；chat 意图在 `routeIntent` 本地分流走 `runChatChain`（`buildChatPrompt` + 纯文本无 json_object），主 prompt 的 JSON schema 只进推荐/介绍链路，第七节已补分流说明。守卫 +8（删除关键词带"的"用例、CONSENT 正反 7 例）、smoke +1（带尾巴点头接上推荐）。⚠ 顺带发现文档 §3.4 等处仍是旧档位"10元内/10-30元"（V2.0 换库时的文档债，真源 `system-prompt.ts` 已是三档） | `lib/rules/patterns.ts` / `lib/llm/index.ts` / `lib/chat/handlers.ts` / `lib/prompts/system-prompt.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / 本文件 §4.4 §5.1 §7 |
 | 2026-11-04 | **改口味连环 Bug：同维度互斥 + 改口味追问场景 + 找补话术**：截图现场「不想吃辣了，想吃甜的」暴露三层问题，全部先复现后修——① `syncMemory` 写忌口时对旧口味零信号 → 新增 `supersedeTasteConflicts(userId, axis)`，忌口落库即作废同轴 `polarity='喜欢'` 旧偏好（轴由 `avoidAxisOf` 从忌口原话抠；过敏原不含轴字天然不触发；限定 polarity 是防「不吃辣」按包含匹配把自己也废掉）② `TASTE_PIVOT_PATTERN` 改口味轮历史场景作废，场景必须本轮重说，否则追问「这次是什么场合吃」（普通要口味不误伤）；`SCENE_COMPLAINT_PATTERN` 命中先认错「我的锅，忘了问你在哪儿吃——」，chat 支路两个 AI 入口统一接 `apologizeForMissedScene`，模型已认错则不垫 ③ 前端 `mergeProfileExclusive` 替代裸 spread（口味与忌口同轴互斥，过敏原永不误伤）；`pickTrustedProfile` 回包同轴互斥拦模型回声。**方向单向**：忌口→口味直接办（用户明说），口味→忌口必须 pending 确认。验证：DB 探针 8/8、`verify` **99/99**、guard 全过、lint/format 全绿、`smoke` **150/150**（新增 14b 连环 12 条） | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `app/_components/storage.ts` / `app/page.tsx` / 两个 AI 入口 / `scripts/{profile,reco}-guard.ts` / `scripts/smoke.mjs` / 本文件 §4.4 §7 |
 | 2026-11-03 | **V2.1 收口：删 `body.userId` 兼容通道 + `cx_token` 滑动续期 + 限流持久化评估**：① `resolveIdentity(req)` 去掉 `bodyUserId` 入参与 `'body'` 来源，只认 `cx_token` → `x-guest-id` → 新发 guest；两个 AI 入口、前端两处请求、`AiRequestBody`/`StreamBody` 类型、`trace.identity` 注释、smoke（含 3 处手工 SSE fetch 还在用旧通道）全部对齐，并新增断言"不带头 + body 写别人 id → 读不到记忆"② `/api/auth/me` 里做滑动续期：新增 `userTokenRemaining()`（与 `verifyUserToken` 同口径，含 `typ` 校验），剩余寿命 < `TOKEN_MAX_AGE/2` 才重签并 `Set-Cookie`；实测剩 1 天续期、剩 20 天不续 ③ 限流持久化**评估后不做**（单实例 + 重启窗口数秒 + SQLite 写放大），结论写进 §10.4。顺带修正旧记录：`cx_token` 一直是 **30 天**，不是 7 天 | `lib/auth/identity.ts` / `lib/auth/jwt.ts` / `app/api/auth/me/route.ts` / 两个 AI 入口 / `app/page.tsx` / `lib/chat/trace.ts` / `scripts/smoke.mjs` / `README.md` / 本文件 §10 |
 | 2026-11-03 | **全量回归时修掉三处（放宽丢 exclude / 意图纠偏只做了 SSE / 忌口与辣味回声打架）**：跑 137 条 smoke 时逐条查红项，三条都不是"新功能写错"，而是**既有支路的死角**：① 候选不足 3 款时的放宽补位 `hardFilter(PRODUCTS, need, [])` 把 `exclude` 一起丢了 → 用户说「换一个」，上一轮那款又被补回来；改成传 `exclude`（为空时行为不变）② **普通接口 `/api/ai` 一直缺 SSE 那两段意图纠偏**（`upgradeForUrge` 催货升级、`chat + allowRecommend` → recommend），模型偶发把「来点吃的」判成 introduce/chat 时，普通接口就回一句"我没太听懂"或陪聊一句了事，一张卡都没有；顺带把 introduce 抠不出商品名的死路改成"先看用户在不在要货"③ `buildNeed` 的改口让路只看 `taste` 太宽——`prefs.flavor` 是模型照 history 抄来的回声，用户这轮说的可能是「还是不想吃辣」，于是忌口被误删；改成按**本轮原话**（`avoidTagsFromText(message)`）二选一互斥：说忌辣就剔 `taste` 里的回声，说要辣才让 `avoid` 让路。`reco-guard` 新增 4 条把这三句口语钉死 | `lib/llm/local-workflow.ts` / `app/api/ai/route.ts` / `scripts/reco-guard.ts` / 本文件 §7 |
@@ -1218,7 +1228,11 @@ RATE_LIMIT_MAX       # 本地跑 smoke 时配 60，生产不要配
 |---|---|---|
 | 禁止"您"，统一"你" | `您` → `你` 直接替换 | 改词不改意，零误伤 |
 | 不许提供应商 / 模型名 | `INTERNAL_LEAK_PATTERN` 命中整句作废 | 正常对话不会出现这些词 |
-| 粗话红线 | `PROFANITY_PATTERN` 命中整句作废 | 只拦明确脏字，不拦"烦死""气炸了" |
+
+> **粗话本地拦截已废除（2026-11-05，外审后）**：`PROFANITY_PATTERN`（卧槽/去死…）整个删除。
+> 用户说"工作累得想死""卧槽今天真倒霉"是情绪宣泄，本地拦截等于规训用户、把朋友变成学究；
+> 接住情绪是大模型自己的能力。人设第 127 行的粗话红线**仍然保留**——那管的是**模型自己**不说脏话，
+> 与"用户的输入 / 模型的回复里出现脏话要不要本地拦"是两回事。
 
 整句作废后走人设内兜底话术，不会让用户看到空气泡。
 

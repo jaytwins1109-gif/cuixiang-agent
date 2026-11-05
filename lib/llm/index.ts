@@ -14,7 +14,6 @@ import {
   KNOWN_SHORT,
   LEAD_IN_REPLY_PATTERN,
   HONORIFIC_PATTERN,
-  PROFANITY_PATTERN,
   INTERNAL_LEAK_PATTERN,
   NO_SPICY_PATTERN,
   NO_SWEET_PATTERN,
@@ -135,7 +134,8 @@ export function cleanReply(raw?: string): string | undefined {
  *   1. **敬语"您"** → 换成"你"。人设两处禁用，且替换不改变句意，代价为零
  *   2. **内部信息**（模型名 / 供应商 / 内部架构）→ 命中即整句作废，交给上层换兜底话术。
  *      正常中文对话不会提到这些词，不担心误伤
- *   3. **脏话 / 粗俗字眼** → 命中即整句作废，同上
+ *   3. **脏话不拦**（2026-11-05）：用户的情绪宣泄（"卧槽今天真倒霉"）不归本地代码管，
+ *      本地拦了就成了规训用户的学究。接住情绪是大模型自己的活
  *
  * **刻意不拦**总结式结尾（"希望对你有帮助"）、关怀语收尾（"早点休息哦"）、
  * emoji 频率、口癖——这些是风格不是事实，正则判不准：
@@ -148,8 +148,9 @@ function sanitizeModelReply(raw?: string): string | undefined {
   const clean = cleanReply(raw);
   if (!clean) return undefined;
 
-  // 内部信息与脏话改词救不回来，整句作废让上层换一句干净的
-  if (INTERNAL_LEAK_PATTERN.test(clean) || PROFANITY_PATTERN.test(clean)) {
+  // 内部信息改词救不回来，整句作废让上层换一句干净的。
+  // 脏话不在这里拦：用户的情绪宣泄不需要本地代码把关（2026-11-05 删 PROFANITY_PATTERN）
+  if (INTERNAL_LEAK_PATTERN.test(clean)) {
     return undefined;
   }
 
@@ -527,7 +528,7 @@ function stripPitchSentences(text: string): string {
  * | 正常说话 | 原样出去（只把"您"改成"你"） |
  * | 半句在夸海口（"行，我给你挑了三样：…"） | 只剪掉许诺那几句，留着接住人的部分 |
  * | 整句都在夸海口 | 让模型按 `CHAT_NO_PITCH_HINT` 重写一次；重写失败才落池 |
- * | 提到内部信息 / 脏话 | 改词救不回来 → 落本地话术池（这是底线，不商量） |
+ * | 提到内部信息 | 改词救不回来 → 落本地话术池（这是底线，不商量；脏话已放开，见 sanitizeModelReply） |
  * | 压根没拿到正文 | 落本地话术池（不能让空气泡出去） |
  *
  * 注意"防线绝对不能拆"：剪许诺和红线拦截都还在，
@@ -547,8 +548,8 @@ export async function settleChatReply(
   const take = (text?: string): string | undefined => {
     const clean = cleanReply(text);
     if (!clean) return undefined;
-    // 红线：内部信息 / 脏话。只有这两种配得上"整句作废"
-    if (INTERNAL_LEAK_PATTERN.test(clean) || PROFANITY_PATTERN.test(clean)) {
+    // 红线：内部信息。只有这一种配得上"整句作废"（脏话已放开——那是用户的情绪，不是模型的错误）
+    if (INTERNAL_LEAK_PATTERN.test(clean)) {
       return undefined;
     }
     const trimmed = stripPitchSentences(clean);

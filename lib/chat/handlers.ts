@@ -739,9 +739,12 @@ export function extractMemoryKeyword(text: string): string {
   const hit = text.match(MEMORY_KEYWORD_PATTERN);
   if (hit) return hit[0];
 
-  // 白名单没认出来（"忘掉我喜欢薯片"）才走动词兜底，且只取动词后面的宾语
+  // 白名单没认出来（"忘掉我喜欢薯片"）才走动词兜底，且只取动词后面的宾语。
+  // 正则捕获从动词后开始，"我喜欢的薯片"会捕到"的薯片"——开头的"的"必须洗掉，
+  // 否则 deleteMemory 拿"的薯片"去 includes 匹配"薯片"永远落空，
+  // 用户明明说了要忘、系统却回"你要我忘掉哪条"
   const like = text.match(MEMORY_LIKE_PATTERN);
-  return like?.[1]?.trim() || '';
+  return like?.[1]?.trim().replace(/^的/, '') || '';
 }
 
 /**

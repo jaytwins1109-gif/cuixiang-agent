@@ -25,6 +25,7 @@ import {
   apologizeForMissedScene,
 } from '@/lib/chat/handlers';
 import { extractPrefsFromText } from '@/lib/llm';
+import { CONSENT_PATTERN } from '@/lib/rules/patterns';
 import { avoidTagsFromText, budgetFromText } from '@/lib/llm/local-workflow';
 import { decideMemoryAction, type RecalledMemory } from '@/lib/memory/store';
 import type { GuardResult } from './guard-types';
@@ -165,11 +166,37 @@ export function runProfileGuard(): GuardResult[] {
     '兜底只取动词后面的宾语',
     extractMemoryKeyword('忘掉我喜欢薯片') || '（抠不出）',
   );
+  // 「的」字陷阱（2026-11-05 外审）：「我**的**薯片」会被正则捕成「的薯片」，
+  // deleteMemory 拿它 includes 匹配「薯片」永远落空 → 用户说了要忘却删不掉。
+  // 上面的白名单用例盖不住这个组合（辣味会被白名单先截走）。
+  report(
+    extractMemoryKeyword('忘掉我喜欢的薯片') === '薯片',
+    '兜底捕到的「的」字开头要洗掉（「的薯片」匹配不上库里任何记录）',
+    extractMemoryKeyword('忘掉我喜欢的薯片') || '（抠不出）',
+  );
   report(
     extractMemoryKeyword('忘掉吧') === '',
     '反向对照：没有偏好词就老实抠不出（不瞎猜）',
     extractMemoryKeyword('忘掉吧') || '（空，正确）',
   );
+
+  // ── 同意判定放宽（2026-11-05 外审）：允许语气词 + 短尾巴，整句钉死不变 ──
+  for (const [text, expect] of [
+    ['好的', true],
+    ['好的，来点', true], // 外审现场：带尾巴整句失败 → 系统继续追问，把人晾着
+    ['行，随便', true],
+    ['要的哦', true],
+    ['好啊那我不买了', false], // 有转折 / 新内容，绝不能当同意
+    ['好，然后呢', false],
+    ['嗯，今天真累', false], // 闲聊不是点头
+  ] as const) {
+    const hit = CONSENT_PATTERN.test(text);
+    report(
+      hit === expect,
+      `同意判定：「${text}」→ ${expect ? '算同意' : '不算'}`,
+      hit ? '命中' : '未命中',
+    );
+  }
 
   /**
    * 抱怨句不是忌口声明。

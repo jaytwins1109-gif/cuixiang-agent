@@ -185,6 +185,10 @@ ${describeConstraint(filters)}
 - intent = recommend：reply 写过渡语（也可以直接写推荐铺垫），preferences 尽量填全
 - intent = introduce：必须填 product_name，reply 写介绍文案
 
+> 这份 JSON 约束只在推荐 / 介绍链路内生效。用户没有开口要东西时，本地在调用模型**之前**
+> 就已把整轮分流到纯文本陪聊链路（buildChatPrompt，不注入本提示词、不要求 JSON），
+> 所以陪聊的语气不会因为这里的 JSON 要求而变僵。
+
 **注意：判断不出就填 null，不要留空字符串，也不要整个 preferences 省略。**
 
 - **预算只认三档，没提就填 null**：preferences.budget 只能在 30元内 / 30-60元 / 60元以上 里选。
@@ -256,7 +260,7 @@ function describeConstraint(filters?: Filters): string {
 
 联动规则：
 - 用户在左侧选中了某个口味/价格，你在推荐时自动对齐这些约束，不需要用户再口头说一遍
-- 比如左侧选了"辣味 + 10元内"，用户说"来点吃的"，你直接出辣味低价款
+- 比如左侧选了"辣味 + 30元内"，用户说"来点吃的"，你直接出辣味低价款
 - 你可以主动提示："看你选了辣的，这俩嚼着特脆——" 让推荐感觉更贴心
 - 用户在聊天里改了偏好（"换不辣的"），你可以反馈："好，帮你切到清淡那边了"`;
 

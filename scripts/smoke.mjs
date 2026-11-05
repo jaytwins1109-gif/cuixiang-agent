@@ -253,6 +253,23 @@ await ask('预热一下');
     names(r2).length > 0 || r2.data.awaiting_prefs === true,
     `${names(r2).join('/')} | ${r2.data.reply}`,
   );
+
+  // 带尾巴的点头（2026-11-05 外审）：「好的，来点」「行，随便」以前整句匹配失败，
+  // 系统认为没同意继续追问，把人晾在原地。放宽后必须能接上推荐。
+  const r3 = await ask('好的，来点', {
+    userId: uid,
+    inRecommendContext: true,
+    history: [
+      { role: 'assistant', content: txt },
+      { role: 'user', content: '要点辣的' },
+      { role: 'assistant', content: r2.data.reply || '辣的可以吗？' },
+    ],
+  });
+  expect(
+    '「好的，来点」带尾巴点头 → 接上推荐（出卡片或继续追问）',
+    names(r3).length > 0 || r3.data.awaiting_prefs === true,
+    `${names(r3).join('/')} | ${r3.data.reply}`,
+  );
 }
 
 // ── 2.6 纯陪聊链路：自由文本，不吐 JSON、不报价、不列清单 ────────
