@@ -17,7 +17,8 @@
 import { runLocalWorkflow, needFollowUp } from '@/lib/llm/local-workflow';
 import { PRODUCTS } from '@/lib/data/snacks';
 import { composeRecommendReply } from '@/lib/llm/reply-composer';
-import type { Preferences, Filters } from '@/lib/llm/index';
+import { extractPrefsFromText, type Preferences, type Filters } from '@/lib/llm/index';
+import { mentionsGoods } from '@/lib/llm/category-words';
 import type { GuardResult } from './guard-types';
 
 const emptyMemory = {
@@ -338,6 +339,44 @@ export function runRecoGuard(): GuardResult[] {
       !!complaint.follow_up && complaint.follow_up.includes('我的锅'),
       '用户抱怨「场景呢」→ 先认错再收集，不机械重问',
       complaint.follow_up || `出了 ${complaint.recommendations.length} 张`,
+    );
+  }
+
+  // ── 11. 外审 2026-11-05：场景否定闸 + 品类词兜底 ──────────────────
+  setSection('【抽取】场景否定闸 / 品类词兜底');
+  {
+    // 「我不想去海边了，太晒了」——"海边"是被否定的，抽成场景会让选品往海边怼
+    report(
+      !extractPrefsFromText('我不想去海边了，太晒了').scene,
+      '「不想去海边」→ 不抽场景（被否定的场景词不是诉求）',
+      extractPrefsFromText('我不想去海边了，太晒了').scene || '（未抽，正确）',
+    );
+    report(
+      !extractPrefsFromText('不想看剧了，没意思').scene,
+      '「不想看剧」→ 不抽场景',
+      extractPrefsFromText('不想看剧了，没意思').scene || '（未抽，正确）',
+    );
+    // 正向说法绝不能被误伤
+    report(
+      extractPrefsFromText('周末想去海边，配点零食').scene === '海边',
+      '「想去海边」→ 照常抽到海边（否定闸不误伤正向诉求）',
+      extractPrefsFromText('周末想去海边，配点零食').scene || '（没抽到！）',
+    );
+    report(
+      extractPrefsFromText('特别想去海边玩').scene === '海边',
+      '「特别想去海边」（含"别"字）→ 不被否定闸误伤',
+      extractPrefsFromText('特别想去海边玩').scene || '（没抽到！）',
+    );
+    // 品类词兜底：说了品类名就算在要货，进推荐链路
+    report(
+      mentionsGoods('我想买个饼干，有什么推荐'),
+      '「我想买个饼干」→ mentionsGoods 命中（进推荐链路）',
+      String(mentionsGoods('我想买个饼干，有什么推荐')),
+    );
+    report(
+      !mentionsGoods('我对坚果过敏') && !mentionsGoods('不想吃辣条'),
+      '反向说法（过敏/不想吃）→ 仍不算要货',
+      `坚果过敏=${mentionsGoods('我对坚果过敏')} 不想吃辣条=${mentionsGoods('不想吃辣条')}`,
     );
   }
 

@@ -276,12 +276,22 @@ export function extractPrefsFromText(text: string): Preferences {
 
   if (CHEAP_PATTERN.test(t)) prefs.budget = '30元内';
 
-  // 场景：聊到"看海/爬山/追剧"时想吃的，推荐要贴合场景，不能永远火鸡面辣条
-  if (/看海|海边|沙滩|吹海风|赶海/.test(t)) prefs.scene = '海边';
-  else if (/爬山|徒步|登山|郊游|野餐|踏青|出去玩|露营/.test(t)) prefs.scene = '户外';
-  else if (/追剧|看剧|看电影|刷剧|电影|剧集/.test(t)) prefs.scene = '看剧';
-  else if (/加班|熬夜|上班|深夜|打工|通宵/.test(t)) prefs.scene = '加班';
-  else if (/办公室|摸鱼|工位/.test(t)) prefs.scene = '办公室';
+  // 场景：聊到"看海/爬山/追剧"时想吃的，推荐要贴合场景，不能永远火鸡面辣条。
+  //
+  // 【否定闸】（2026-11-05 外审 P0）：「我不想去海边了，太晒了」里的"海边"
+  // 是**被否定的**，直接命中会把场景抽成"海边"，选品从此往海边怼——
+  // 用户越说不想去越被推海边款。命中场景词后回看前文：紧邻处（被标点隔断前、
+  // 4 字以内）有否定词就算"说了但否了"，不抽。
+  const sceneHit = (re: RegExp): boolean => {
+    const m = re.exec(t);
+    if (!m) return false;
+    return !/(不想|不去|别去|没去|再也不|不在)[^，。！？]{0,4}$/.test(t.slice(0, m.index));
+  };
+  if (sceneHit(/看海|海边|沙滩|吹海风|赶海/)) prefs.scene = '海边';
+  else if (sceneHit(/爬山|徒步|登山|郊游|野餐|踏青|出去玩|露营/)) prefs.scene = '户外';
+  else if (sceneHit(/追剧|看剧|看电影|刷剧|电影|剧集/)) prefs.scene = '看剧';
+  else if (sceneHit(/加班|熬夜|上班|深夜|打工|通宵/)) prefs.scene = '加班';
+  else if (sceneHit(/办公室|摸鱼|工位/)) prefs.scene = '办公室';
 
   // 忌口命中后跳过对应口味分支，"不吃辣，来点甜的"要能同时拿到 avoid + flavor
   if (!noSpicy && SPICY_WANT_PATTERN.test(t)) prefs.flavor = '辣味';
@@ -847,18 +857,6 @@ async function callProvider(rt: BrainRuntime, messages: ChatMessage[]): Promise<
  */
 const REQUEST_TIMEOUT_MS = 8_000;
 
-/**
- * 容忍连续空白的次数。
- *
- * 空白是偶发还是这家模型的老毛病，看连着几次就知道：连着两次都在 json_object 下吐空，
- * 就别再拿第一次去赌了，后面直接走自由输出，省掉一次几乎必然白等的请求和一份 token。
- * 只要有一次正常返回就清零，格式约束自动恢复。
- */
-const BLANK_STREAK_LIMIT = 2;
-
-/** provider → 当前连续空白次数 */
-const blankStreak = new Map<string, number>();
-
 /** 请求参数：`chatOnly` 表示走纯陪聊链路（不套 json_object，温度走陪聊档） */
 interface RequestOptions {
   chatOnly?: boolean;
@@ -871,6 +869,13 @@ interface RequestOptions {
  * completion_tokens 也有几十，但内容全是空格换行。同参数重试无效——是 json_object
  * 这个约束本身把模型卡住了。所以重试时**摘掉 response_format**，让它自由输出，
  * 靠 extractJson / guessIntent 兜住格式，成功率明显更高。
+ *
+ * 【不做跨请求记账】（2026-11-05 外审 P0）以前这里有个按 provider 记的
+ * 全局 blankStreak Map："连空白两次 → 这家之后连第一次都不走 json_object"。
+ * 但那是**进程级**状态：一个用户赶上模型抽风，后面**所有用户**的请求都跟着
+ * 降级成自由文本，结构化成功率平白暴跌，直到某次成功才清零。
+ * 改成只看**当前这一次调用**：attempt 0 走 json、attempt 1 解除约束——
+ * 单次调用内的重试逻辑保留，跨请求的"记账"整个删掉。
  */
 async function requestOnce(
   rt: BrainRuntime,
@@ -880,12 +885,10 @@ async function requestOnce(
   let lastContent = '';
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    const streak = blankStreak.get(rt.provider) || 0;
     // 第一次走 json_object 保证格式；一旦空白，重试就解除这个约束。
-    // 连着空白达到上限，说明这家的 json_object 不靠谱，第一次也不再拿它赌。
+    // 判定只看当前这次调用，不跨请求记账（见函数头【不做跨请求记账】）。
     // 陪聊链路从头到尾都不套这个约束——它要的就是自由文本
-    const useJson =
-      !opts.chatOnly && rt.supportsJson && attempt === 0 && streak < BLANK_STREAK_LIMIT;
+    const useJson = !opts.chatOnly && rt.supportsJson && attempt === 0;
     // 温度：JSON 模式降 0.3 稳格式；解除约束后升温 0.9，让语气重新活起来。
     // 陪聊链路走 0.75——比结构化那档活，又不至于飘到跑题
     const temperature = opts.chatOnly
@@ -937,12 +940,8 @@ async function requestOnce(
       lastContent = content;
 
       if (content.trim()) {
-        blankStreak.set(rt.provider, 0);
         return content;
       }
-      // 陪聊链路本来就是自由输出，吐空白跟 json_object 没关系，
-      // 不该拿它去判定"这家的 JSON 模式不靠谱"（那会把结构化链路的约束一起误伤）
-      if (!opts.chatOnly) blankStreak.set(rt.provider, streak + 1);
 
       // 把现场打全，方便定位（finish_reason=length 说明被截断，stop 说明模型自己吐了空）
       console.warn(

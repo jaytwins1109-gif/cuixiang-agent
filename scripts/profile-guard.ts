@@ -25,7 +25,7 @@ import {
   apologizeForMissedScene,
 } from '@/lib/chat/handlers';
 import { extractPrefsFromText } from '@/lib/llm';
-import { CONSENT_PATTERN } from '@/lib/rules/patterns';
+import { CONSENT_PATTERN, PENDING_NO_PATTERN } from '@/lib/rules/patterns';
 import { avoidTagsFromText, budgetFromText } from '@/lib/llm/local-workflow';
 import { decideMemoryAction, type RecalledMemory } from '@/lib/memory/store';
 import type { GuardResult } from './guard-types';
@@ -346,6 +346,28 @@ export function runProfileGuard(): GuardResult[] {
       apologizeForMissedScene('来点甜的', '好嘞') === '好嘞',
       '没抱怨场景 → 原样放行',
       apologizeForMissedScene('来点甜的', '好嘞'),
+    );
+  }
+
+  // ── 确认答复的否定闸（2026-11-05 外审 P0）────────────────────────
+  // handlePendingConfirmation 里否定开头的答复一律本地办结，不再见长句就放行大脑
+  // （大脑够不着 pending 状态，「不是，我是说微辣可以接受」曾让确认无限挂着）。
+  // 这里测的是正则层：锚定 ^ 保证"不是"不在句首的句子不会被误拦。
+  {
+    report(
+      PENDING_NO_PATTERN.test('不是，我是说微辣可以接受。'),
+      '「不是，我是说微辣可以接受。」→ 否定开头命中（本地办结，不再放行大脑）',
+      String(PENDING_NO_PATTERN.test('不是，我是说微辣可以接受。')),
+    );
+    report(
+      PENDING_NO_PATTERN.test('不是不吃辣，是最近胃不好才不吃的'),
+      '「不是不吃辣，是胃不好」→ 同样按"否"办结（不改口，语义正确）',
+      String(PENDING_NO_PATTERN.test('不是不吃辣，是最近胃不好才不吃的')),
+    );
+    report(
+      !PENDING_NO_PATTERN.test('其实我觉得还好吧，不用改'),
+      '「其实我觉得还好吧」→ "不是"不在句首，不命中（交给大脑正常接话）',
+      String(PENDING_NO_PATTERN.test('其实我觉得还好吧，不用改')),
     );
   }
 

@@ -23,7 +23,6 @@ import {
   INTRODUCE_PATTERN,
   NIGHT_PATTERN,
   PICK_REFERENCE_PATTERN,
-  RETRACTION_PATTERN,
   SCENE_COMPLAINT_PATTERN,
   SPICY_DENIAL_PATTERN,
 } from '@/lib/rules/patterns';
@@ -773,20 +772,15 @@ export function looksQualifiedAnswer(text: string): boolean {
 }
 
 /**
- * 长句里的例外：否认 + 撤回（"不是，我开玩笑的"）。
- *
- * `looksQualifiedAnswer` 见长句就放行，是为了别把
- * 「不是不吃辣，是最近胃不好才不吃的」这种**带新信息**的转折拦死。
- * 但"我开玩笑的"没有新信息，只有"刚才那句不算"——放行等于 pending 一直挂着。
- * 所以这类句子本地办结，按"否"处理。
- */
-export function isRetraction(text: string): boolean {
-  return PENDING_NO_PATTERN.test(text.trim()) && RETRACTION_PATTERN.test(text);
-}
-
-/**
  * 接住用户对「你要改口吗」的答复。
  * 只有明确表态（是 / 不是）才拦；说了别的一律放行，让大脑正常接话。
+ *
+ * **否定开头的长句必须本地办结**（2026-11-05 外审 P0）：以前只有
+ * "否认+撤回"（"不是，我开玩笑的"）这类短例外拦得住，其余见长句就放行大脑——
+ * 「不是，我是说微辣可以接受。」被放行后大脑够不着 pending 状态，
+ * 确认永远挂着，后续每轮都被追问，等于死循环。
+ * 按"否"办结是保守解：不改口（旧偏好保留），用户真想改成"微辣"
+ * 会自己再说一遍，大脑下一轮接得住；宁可少办，不能瞎猜着改忌口。
  * @returns 给用户的回复；返回 null 表示这轮不是对确认的答复
  */
 export async function handlePendingConfirmation(
@@ -794,12 +788,15 @@ export async function handlePendingConfirmation(
   message: string,
 ): Promise<string | null> {
   const text = message.trim();
-  // 带条件的长答案不自己判，交给大脑（见 looksQualifiedAnswer）。
-  // 例外：否认 + 撤回（"不是，我开玩笑的"）——见 isRetraction
-  if (looksQualifiedAnswer(text) && !isRetraction(text)) return null;
+  // PENDING_NO_PATTERN 是 ^(锚定) 的：只有**以否定开头**才算否认——
+  // 「其实我觉得还好吧」这种"不是"不在句首的不会被误拦
+  const noHit = PENDING_NO_PATTERN.test(text);
+  // 带条件的长答案不自己判，交给大脑（见 looksQualifiedAnswer）；
+  // 否定开头的例外见上：办结挂着的确认，比把用户晾在追问里重要
+  if (looksQualifiedAnswer(text) && !noHit) return null;
 
   const yes = PENDING_YES_PATTERN.test(text);
-  const no = !yes && PENDING_NO_PATTERN.test(text);
+  const no = !yes && noHit;
   if (!yes && !no) return null;
 
   const r = await resolvePending(userId, yes);

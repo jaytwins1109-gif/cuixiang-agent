@@ -347,11 +347,11 @@ DeepSeek 在 `json_object` 模式下会吐一串**纯空白**（`finish_reason=s
 由 `callBrain` 换备用大脑、再由 `app/api/ai/route.ts` 兜底。**不会把 `AbortError` 原文漏到前端。**
 HTTP 报错（`!res.ok`）不重试——额度、鉴权这类问题不会自己好，重试只是白等 8 秒。
 
-**自适应跳过（`BLANK_STREAK_LIMIT = 2`）**：光靠重试，每次空白都要付两份 token。
-所以按 provider 记「连续空白次数」：连满 2 次就判定这家模型的 `json_object` 不靠谱，
-**后续请求的第 1 次直接走自由输出**，省掉那次几乎必然白等的请求；
-只要有一次正常返回就清零，格式约束自动恢复。
-进程级 Map，provider 就两三个，不设淘汰。
+**空白重试（仅限当前这次调用）**：光靠重试，每次空白都要付两份 token。
+重试时**摘掉 response_format** 让模型自由输出（`attempt 1`），靠 `extractJson` / `guessIntent`
+兜住格式。⚠️ 曾经按 provider 记全局「连续空白次数」（进程级 Map），连满 2 次后这家模型
+**后续所有请求**的第 1 次都直接走自由输出——一个用户赶上模型抽风，全体用户的结构化
+成功率跟着暴跌（2026-11-05 外审 P0 删除）。现在只看当前这一次调用，不跨请求记账。
 
 ### 3.3 输出解析兜底
 
@@ -414,7 +414,10 @@ HTTP 报错（`!res.ok`）不重试——额度、鉴权这类问题不会自己
   - `不吃甜\|不想吃甜\|不要甜\|不嗜甜\|忌糖\|戒糖` → `avoid=不吃甜`
   - `花生过敏` → `avoid=花生过敏`；`坚果过敏` → `avoid=坚果过敏`
 - 预算：`太贵\|贵了\|便宜[一点些]\|没那么贵` → `budget=10元内`
-- 场景：`看海\|海边\|沙滩\|吹海风\|赶海` → 海边；`爬山\|徒步\|野餐\|露营\|出去玩` → 户外；`追剧\|看剧\|看电影\|刷剧` → 看剧；`加班\|熬夜\|深夜\|打工\|通宵` → 加班；`办公室\|摸鱼\|工位` → 办公室
+- 场景：`看海\|海边\|沙滩\|吹海风\|赶海` → 海边；`爬山\|徒步\|野餐\|露营\|出去玩` → 户外；`追剧\|看剧\|看电影\|刷剧` → 看剧；`加班\|熬夜\|深夜\|打工\|通宵` → 加班；`办公室\|摸鱼\|工位` → 办公室。
+  **否定闸**（2026-11-05 外审 P0）：命中场景词后回看前文，紧邻处（被标点隔断前、4 字以内）出现
+  `不想\|不去\|别去\|没去\|再也不\|不在` 就算"说了但否了"，不抽——「我不想去海边了，太晒了」
+  若照抽，选品从此往海边怼，用户越说不想去越被推海边款
 - 口味：命中忌口后跳过对应分支，让「不吃辣，来点甜的」能同时拿到 `avoid + flavor`
 - 口感（2026-11-01 补）：`脆\|酥\|嘎嘣\|咔嚓\|咔滋` → `texture=脆`；`嚼劲\|耐嚼\|有嚼[头劲]\|筋道\|磨牙\|嚼着` → `嚼感`；`软的\|绵软\|入口即化\|软糯` → `软`。
   以前本地**完全不抽口感**，`texture` 只有「模型当轮推测」一个来源，
@@ -694,9 +697,12 @@ chat 被「反向防呆」升级成 recommend 时，模型那句是按"陪聊"�
 - 都不命中 → 放行，正常走大脑
 
 **先于上面三条的放行判断**：带条件的长答案不自己判，直接放行给大脑——见 `looksQualifiedAnswer()`。
-一句「不是不吃辣，是微辣可以接受」开头就命中"不是"，按否定拦下来，
-"微辣可以"这条新信息就整个丢掉了。超过 5 个字、或带转折/限定词
-（但是/不过/其实/只是/而是/可以接受/除了/前提是/看情况/偶尔/一点点/微辣/不过分）的一律放行。
+⚠️ **否定开头的答复必须本地办结**（2026-11-05 外审 P0，二次修正 2026-10-31 的放行决策）：
+「不是，我是说微辣可以接受」见长句放行后，大脑够不着 pending 状态，
+确认永远挂着、后续每轮都被追问，等于死循环。现在只要 `PENDING_NO_PATTERN`（锚定 `^`）
+命中就按"否"办结：pending 清掉、旧偏好保留，**宁可少办不能瞎猜着改忌口**——
+用户真想改成"微辣"会自己再说，大脑下一轮接得住。句首没有否定词的转折句
+（"其实我觉得还好吧"）仍然放行。
 
 办结后**直接 `return` 固定话术**（`memory_action: 'resolved'`），不调模型，极速响应。
 
@@ -1014,6 +1020,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 
 | 日期 | 改动 | 涉及文件 |
 |---|---|---|
+| 2026-11-05 | **核心链路外审 5 处（P0×3 + P1×2）**：① `handlePendingConfirmation` 否定开头答复一律本地按"否"办结（二次修正 10-31 的放行决策——放行导致 pending 挂死循环；删 `isRetraction`，`PENDING_NO_PATTERN` 锚定 `^` 保证句中"不是"不误拦）② 删 `requestOnce` 的进程级 `blankStreak` Map——一个用户赶上空白、全体用户跟着降级自由文本；改为只看当前调用 attempt 0/1 ③ `extractPrefsFromText` 场景抽取加否定闸（`sceneHit` 回看前文 4 字内 `不想/不去/别去/没去/再也不/不在` 不抽）④ `page.tsx` final 比 delta 短（嘴瓢被剪）时纯文本轮垫"哎呀刚才嘴瓢了，重说——"+ 挂 `refreshed` 淡入（阈值 -6 防微差触发）⑤ `CATEGORY_WORDS` 补宽（虾条/雪饼/蛋卷/卤味/螺蛳粉/小鱼干/棉花糖/开心果等 20+ 常见口语句；链路 `allowRecommend → mentionsGoods` 本来就通，外审举例的"饼干"原在表中）。守卫 +9（场景否定闸正反 4 + mentionsGoods 2 + PENDING_NO 锚定 3）、smoke +2（否定场景端到端） | `lib/chat/handlers.ts` / `lib/llm/index.ts` / `lib/llm/category-words.ts` / `app/page.tsx` / `scripts/reco-guard.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / 本文件 §3.2 §4.5 §5.3 |
 | 2026-11-05 | **外审 6 处修复（脏话拦截废除 / 删除关键词洗"的" / CONSENT 放宽 / 档位示例对齐 / 2 处核实已达标）**：① `PROFANITY_PATTERN` 整个删除（正则 + `sanitizeModelReply` / `settleChatReply` 两处引用）——用户骂脏话是情绪宣泄，本地拦截等于规训用户；人设第 127 行"模型自己不说脏话"的红线保留 ② `extractMemoryKeyword` 兜底捕获洗掉开头的"的"——「忘掉我**的**薯片」→「的薯片」，`includes` 永远落空（白名单用例盖不住：带白名单词的会被先截走） ③ `CONSENT_PATTERN` 放宽：语气词 `*`、允许短尾巴，"好的，来点""行，随便"算点头；有转折/新内容（"好啊那我不买了"）仍不算 ④ `describeConstraint` 示例"辣味 + 10元内"→"30元内"（V2.0 换库后的上下层脱节） ⑤ **核实已达标**：`RECOMMEND_PITCH_PATTERN` 只在完整 reply 上跑（`brain-stream.ts` A/B/C 分层，delta 阶段仅结构级抽取+零宽清洗）；chat 意图在 `routeIntent` 本地分流走 `runChatChain`（`buildChatPrompt` + 纯文本无 json_object），主 prompt 的 JSON schema 只进推荐/介绍链路，第七节已补分流说明。守卫 +8（删除关键词带"的"用例、CONSENT 正反 7 例）、smoke +1（带尾巴点头接上推荐）。⚠ 顺带发现文档 §3.4 等处仍是旧档位"10元内/10-30元"（V2.0 换库时的文档债，真源 `system-prompt.ts` 已是三档） | `lib/rules/patterns.ts` / `lib/llm/index.ts` / `lib/chat/handlers.ts` / `lib/prompts/system-prompt.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / 本文件 §4.4 §5.1 §7 |
 | 2026-11-04 | **改口味连环 Bug：同维度互斥 + 改口味追问场景 + 找补话术**：截图现场「不想吃辣了，想吃甜的」暴露三层问题，全部先复现后修——① `syncMemory` 写忌口时对旧口味零信号 → 新增 `supersedeTasteConflicts(userId, axis)`，忌口落库即作废同轴 `polarity='喜欢'` 旧偏好（轴由 `avoidAxisOf` 从忌口原话抠；过敏原不含轴字天然不触发；限定 polarity 是防「不吃辣」按包含匹配把自己也废掉）② `TASTE_PIVOT_PATTERN` 改口味轮历史场景作废，场景必须本轮重说，否则追问「这次是什么场合吃」（普通要口味不误伤）；`SCENE_COMPLAINT_PATTERN` 命中先认错「我的锅，忘了问你在哪儿吃——」，chat 支路两个 AI 入口统一接 `apologizeForMissedScene`，模型已认错则不垫 ③ 前端 `mergeProfileExclusive` 替代裸 spread（口味与忌口同轴互斥，过敏原永不误伤）；`pickTrustedProfile` 回包同轴互斥拦模型回声。**方向单向**：忌口→口味直接办（用户明说），口味→忌口必须 pending 确认。验证：DB 探针 8/8、`verify` **99/99**、guard 全过、lint/format 全绿、`smoke` **150/150**（新增 14b 连环 12 条） | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `lib/memory/store.ts` / `lib/llm/local-workflow.ts` / `app/_components/storage.ts` / `app/page.tsx` / 两个 AI 入口 / `scripts/{profile,reco}-guard.ts` / `scripts/smoke.mjs` / 本文件 §4.4 §7 |
 | 2026-11-03 | **V2.1 收口：删 `body.userId` 兼容通道 + `cx_token` 滑动续期 + 限流持久化评估**：① `resolveIdentity(req)` 去掉 `bodyUserId` 入参与 `'body'` 来源，只认 `cx_token` → `x-guest-id` → 新发 guest；两个 AI 入口、前端两处请求、`AiRequestBody`/`StreamBody` 类型、`trace.identity` 注释、smoke（含 3 处手工 SSE fetch 还在用旧通道）全部对齐，并新增断言"不带头 + body 写别人 id → 读不到记忆"② `/api/auth/me` 里做滑动续期：新增 `userTokenRemaining()`（与 `verifyUserToken` 同口径，含 `typ` 校验），剩余寿命 < `TOKEN_MAX_AGE/2` 才重签并 `Set-Cookie`；实测剩 1 天续期、剩 20 天不续 ③ 限流持久化**评估后不做**（单实例 + 重启窗口数秒 + SQLite 写放大），结论写进 §10.4。顺带修正旧记录：`cx_token` 一直是 **30 天**，不是 7 天 | `lib/auth/identity.ts` / `lib/auth/jwt.ts` / `app/api/auth/me/route.ts` / 两个 AI 入口 / `app/page.tsx` / `lib/chat/trace.ts` / `scripts/smoke.mjs` / `README.md` / 本文件 §10 |
@@ -1123,7 +1130,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 |---|---|---|---|
 | 1 | ~~`renderMemoryForPrompt` 定义了但从未被调用~~ **已于 2026-10-30 修复**：`route.ts` → `callBrain({ memoryText })` → system 第九节 | `lib/memory/store.ts` / `lib/llm/index.ts` / `app/api/ai/route.ts` | 已消除，见 4.3 |
 | 2 | ~~`fetch` 无超时，模型挂起时前端一直转圈~~ **已于 2026-10-31 修复**：`AbortController` + 8s，超时换参数重试一次，仍超时抛中文错误交上层兜底 | `lib/llm/index.ts` `requestOnce` | 已消除，见 3.2 |
-| 3 | ~~DeepSeek 偶发吐真空白，每次都要二次请求~~ **已于 2026-10-31 缓解**：按 provider 记连续空白次数，连满 2 次后这家模型直接走自由输出，不再白等第一次；偶发空白仍由二次请求兜底 | `lib/llm/index.ts` `requestOnce` | 偶发时仍有双倍 token，频率已大幅降低，见 3.2 |
+| 3 | ~~DeepSeek 偶发吐真空白，每次都要二次请求~~ **已于 2026-10-31 缓解 / 2026-11-05 收敛**：重试时摘掉 json_object 走自由输出；原按 provider 记全局连续空白的"自适应跳过"因跨请求误伤（一个用户抽风、全体降级）已删除，只看当前调用 | `lib/llm/index.ts` `requestOnce` | 偶发时仍有双倍 token，不再跨请求记账 |
 | 4 | ~~`pending` 记忆写下去后没有任何流程去确认它~~ **已于 2026-10-30 修复**：入口前置拦截确认答复 + `resolvePending` 转正/作废 | `lib/memory/store.ts` / `app/api/ai/route.ts` | 已消除，见 4.5 |
 | 5 | ~~`ADMIN_PASSWORD_HASH` 未配置，`/admin` 处于禁用状态~~ **已于 2026-10-31 配置**：`.env.local` 已写入口令 sha256，后台可直接登录（忘记口令就重新生成一份覆盖） | `.env.local` / `app/admin/page.tsx` | 已消除，见 10.1 |
 | 6 | ~~`cuixiang_prompt.md` 与 `docs/脆香零食-完整项目文档.md` MD5 完全相同~~ **已于 2026-10-31 消除**：根目录那份改为只指向正文的入口文件，正文只在 `docs/` 保留一份 | 根目录 / `docs/` | 已消除，见 1 节头部说明 |

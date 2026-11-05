@@ -526,8 +526,21 @@ export default function Page() {
           // 会话已经被"新对话"重置：这条结果整个作废。
           // 少了这道判断，用户就会看到"新会话里凭空冒出上一轮的回答"
           if (sessionId.current !== session) return true;
-          // 最终文案可能被本地防呆改写（比如把"清单如下"兜掉），所以整体替换
-          applyPayload(data, bubbleId);
+          //
+          // 【剪句平滑收尾】（2026-11-05 外审 P1）：final 可能比 delta 已经
+          // 吐出去的字**短**——后端把"行，我给你挑了三样："这类嘴瓢整句剪掉了。
+          // 直接整体替换，用户看过的字凭空消失，像灵异事件。
+          // 纯文本轮（无卡片）垫一句"重说"，把"变化"变成一个有意的动作；
+          // 推荐轮的收尾本来就伴随卡片弹出，替换不突兀，不垫话。
+          // 阈值 -6：只是 trim / 标点级别的微小差异不触发。
+          const finalText = typeof data.reply === 'string' ? data.reply.trim() : '';
+          const clipped =
+            finalText && acc && !data.recommendations?.length && finalText.length < acc.length - 6;
+          applyPayload(
+            clipped ? { ...data, reply: `哎呀刚才嘴瓢了，重说——${finalText}` } : data,
+            bubbleId,
+            clipped,
+          );
         }
       }
     }

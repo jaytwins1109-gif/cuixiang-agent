@@ -1557,6 +1557,27 @@ function runGuard(file, args = []) {
   );
 }
 
+// ── 37. 被否定的场景不抽（2026-11-05 外审 P0）────────────────────────
+// 「我不想去海边了」里的"海边"是被否定的——抽成场景会让选品往海边怼，
+// 用户越说不想去越被推海边款。否定闸后应追问场景或按偏好正常出卡，
+// 回复里不应拿"海边"当约束（过渡语池会带出"吹着海风"这类场景话术）。
+{
+  const uid = `smoke_negscene_${Date.now()}`;
+  testUsers.push(uid);
+  const r = await ask('不想去海边了，太晒了，来点零食', { userId: uid });
+  const reply = (r.data.reply || '').trim();
+  expect(
+    '「不想去海边了」→ 不拿海边当场景约束（追问场景或正常出卡）',
+    names(r).length > 0 || r.data.awaiting_prefs === true || reply.length > 0,
+    `${names(r).join('/')} | ${reply}`,
+  );
+  expect(
+    '「不想去海边了」→ 回复不出现海边场景话术（吹着海风/看海标配）',
+    !/海风|看海标配|海边就得|赶海/.test(reply),
+    reply.replace(/\n/g, ' ').slice(0, 60),
+  );
+}
+
 const pruned = await pruneUsers(testUsers);
 
 // ── 汇总 ─────────────────────────────────────────
