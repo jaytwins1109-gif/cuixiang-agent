@@ -27,7 +27,11 @@ export async function GET(req: NextRequest) {
     for (let i = 6; i >= 0; i--) {
       byDay.set(new Date(Date.now() - i * DAY_MS).toISOString().slice(0, 10), 0);
     }
-    for (const r of recent) byDay.set(r.createdAt.toISOString().slice(0, 10), (byDay.get(r.createdAt.toISOString().slice(0, 10)) ?? 0) + 1);
+    for (const r of recent)
+      byDay.set(
+        r.createdAt.toISOString().slice(0, 10),
+        (byDay.get(r.createdAt.toISOString().slice(0, 10)) ?? 0) + 1,
+      );
 
     const [totalUsers, totalMessages, activeProducts] = await Promise.all([
       prisma.user.count(),

@@ -22,7 +22,20 @@ const ARRAY_FIELDS = [
 ] as const;
 
 /** 标量字段与取值域校验 */
-const SCALARS = ['name', 'category', 'price', 'reason', 'emoji', 'spicy', 'giftOk', 'childOk', 'stock', 'quality', 'margin', 'active'] as const;
+const SCALARS = [
+  'name',
+  'category',
+  'price',
+  'reason',
+  'emoji',
+  'spicy',
+  'giftOk',
+  'childOk',
+  'stock',
+  'quality',
+  'margin',
+  'active',
+] as const;
 
 interface ProductInput {
   skuId?: string;
@@ -56,7 +69,10 @@ function buildData(body: ProductInput): Record<string, unknown> {
   if (data.price !== undefined && (typeof data.price !== 'number' || data.price < 0)) {
     throw new Error('price 必须是非负数字');
   }
-  if (data.spicy !== undefined && (typeof data.spicy !== 'number' || data.spicy < 0 || data.spicy > 3)) {
+  if (
+    data.spicy !== undefined &&
+    (typeof data.spicy !== 'number' || data.spicy < 0 || data.spicy > 3)
+  ) {
     throw new Error('spicy 取值 0-3');
   }
   if (data.stock !== undefined && data.stock !== 'in_stock' && data.stock !== 'out_of_stock') {
@@ -156,7 +172,10 @@ export async function PUT(req: NextRequest) {
     const code = (err as { code?: string })?.code;
     if (code === 'P2025') return NextResponse.json({ error: 'skuId 不存在' }, { status: 404 });
     if (!code?.startsWith('P')) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        { status: 400 },
+      );
     }
     console.error('[admin/products PUT]', err);
     return NextResponse.json({ error: '商品更新失败' }, { status: 500 });
