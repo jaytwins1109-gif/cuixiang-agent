@@ -19,10 +19,10 @@ import {
   PROFILE_LABEL,
   PROFILE_RESET_KEY,
   QUICK,
-  SCENES,
   STORE_KEY,
   WANT_KEY,
   WELCOME,
+  WELCOME_CARDS,
   type ThemeKey,
 } from './_components/constants';
 import type { Filters, MemorySnapshot, Msg, Rec } from './_components/types';
@@ -839,18 +839,18 @@ export default function Page() {
             {messages.length <= 1 && !loading && (
               <div className="animate-fade-in pb-2 pt-4">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-500">
-                  ✨ 员工数字助手
+                  ✨ 零食推荐助手
                 </span>
-                <h2 className="mt-3 text-2xl font-extrabold text-slate-800">体验员工，你好 👋</h2>
+                <h2 className="mt-3 text-2xl font-extrabold text-slate-800">今天想吃点什么？👋</h2>
                 <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-400">
-                  今天有什么可以帮你的？
+                  馋了直接说，想找人说话也行。
                   <br />
                   可以选下面的话题，也可以在输入框直接提问。
                 </p>
 
                 {/* 四张快捷提问卡：细边框圆角，hover 轻微上浮 */}
                 <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {SCENES.map((s) => (
+                  {WELCOME_CARDS.map((s) => (
                     <button
                       key={s.title}
                       onClick={() => send(s.text)}
@@ -920,7 +920,7 @@ export default function Page() {
                       send();
                     }
                   }}
-                  placeholder="输入你的问题，例如：我还有几天年假？"
+                  placeholder="说点什么...（Enter 发送，Shift+Enter 换行）"
                   className="scroll-slim min-w-0 flex-1 resize-none bg-transparent py-2 text-sm leading-relaxed outline-none placeholder:text-slate-400"
                 />
                 <button

@@ -47,11 +47,7 @@ export function HeroCard({
           <br />
           你的零食好帮手。
         </h1>
-        <p className="mt-2 text-xs leading-relaxed text-white/50">
-          从入职第一天，到日常想吃点什么，
-          <br />
-          聊着聊着，它就记住了。
-        </p>
+        <p className="mt-2 text-xs leading-relaxed text-white/50">馋了直接说，想找人说话也行。</p>
       </div>
 
       {/* 快捷咨询竖排：bg-white/10 半透明底，右侧箭头 */}
