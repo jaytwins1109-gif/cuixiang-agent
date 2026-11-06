@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AuthDialog, type AuthMode } from './_components/auth-dialog';
 import { Bubble, MsgTime } from './_components/bubble';
 import { FilterPanel } from './_components/filter-panel';
+import { HeroCard, SkeletonBubble } from './_components/hero-card';
 import { finalPrice } from './_components/format';
 import { NavBtn } from './_components/nav-btn';
 import { SnackCard } from './_components/snack-card';
@@ -673,6 +674,16 @@ export default function Page() {
 
   const active = [filters.flavor, filters.budget].filter(Boolean) as string[];
 
+  /**
+   * 骨架屏判定（渲染派生，只读不改）：
+   * loading 且流式占位还没吐出第一个字 → 显示呼吸假气泡；
+   * 占位里已经有字了 → 回到原来的“脆脆正在想”。
+   * 一次性接口路径没有 's_' 占位，全程显示假气泡，直到 applyPayload 落地。
+   */
+  const lastMsg = messages[messages.length - 1];
+  const streamingStarted = !!lastMsg?.id?.startsWith('s_') && !!lastMsg.content;
+  const waitingFirst = loading && !streamingStarted;
+
   /** 想要清单里第一款能凑单的商品：给「我的」抽屉用 */
   const addOnTip = wantList.map((w) => w.promo?.add_on).find((a) => a && a.gap > 0);
 
@@ -710,37 +721,43 @@ export default function Page() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-cx-50">
-      {/* ── 顶栏 ─────────────────────────────── */}
-      <header className="z-20 flex shrink-0 items-center gap-3 border-b border-cx-100 bg-white/90 px-4 py-3 backdrop-blur">
+    <div className="flex h-screen flex-col bg-slate-50">
+      {/* ── 顶栏（白底通透，右上角高频入口）────────── */}
+      <header className="z-20 flex shrink-0 items-center gap-3 bg-white/70 px-4 py-3 backdrop-blur">
         <button
           onClick={() => setDrawer(true)}
-          className="rounded-xl p-2 text-cx-500 hover:bg-cx-50 lg:hidden"
+          className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 lg:hidden"
           aria-label="打开口味栏"
         >
           <span className="text-lg">☰</span>
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <span className="text-2xl">🥜</span>
-          <span className="text-lg font-extrabold tracking-wide text-cx-600">脆香零食</span>
-          <span className="hidden text-xs text-cx-400 sm:inline">你的零食推荐好友</span>
+          <span className="whitespace-nowrap text-lg font-extrabold tracking-wide text-slate-800">
+            脆香零食
+          </span>
+          <span className="hidden text-xs text-slate-400 sm:inline">你的零食推荐好友</span>
         </div>
 
         {/*
-          顶栏只留三个入口。
-          「+ 新对话」是最高频的逃生出口，文字常驻；
-          「推荐」「我的」在窄屏压成图标——375px 的手机上四个带文字的按钮
-          会把输入框挤得只剩一半，而这两个入口靠图标 + title 完全认得出来。
+          右上角只留两个高频入口：新对话（文字常驻）+ 我的（头像 + 想要数徽标）。
+          「推荐」压成图标保留——它是无输入直达推荐的最短路径。
         */}
-        <nav className="ml-auto flex items-center gap-0.5 text-sm sm:gap-1">
-          <NavBtn onClick={newChat}>+ 新对话</NavBtn>
+        <nav className="ml-auto flex items-center gap-1 text-sm sm:gap-1.5">
+          <button
+            onClick={newChat}
+            className="inline-flex min-h-[40px] items-center whitespace-nowrap rounded-full bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:bg-slate-50"
+          >
+            ＋ 新对话
+          </button>
           <NavBtn onClick={() => send('推荐个零食')} label="推荐零食">
-            <span className="sm:hidden">🍿</span>
-            <span className="hidden sm:inline">推荐</span>
+            <span>🍿</span>
           </NavBtn>
           <NavBtn onClick={() => setMyOpen(true)} label="我的清单与长期偏好">
-            <span>👤</span>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-600">
+              👤
+            </span>
             {wantList.length > 0 && (
               <span className="ml-0.5 rounded-full bg-cx-300 px-1.5 py-0.5 text-[10px] font-bold text-white">
                 {wantList.length}
@@ -752,9 +769,10 @@ export default function Page() {
         </nav>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        {/* ── 左侧口味栏（桌面常驻）──────────────── */}
-        <aside className="hidden w-64 shrink-0 border-r border-cx-100 bg-white/70 p-4 lg:block">
+      <div className="mx-auto flex w-full min-h-0 max-w-6xl flex-1 gap-6 px-4 py-5">
+        {/* ── 左侧：信息卡片 + 口味栏（桌面常驻）─────── */}
+        <aside className="hidden w-72 shrink-0 space-y-4 lg:block">
+          <HeroCard onScene={(t) => void send(t)} busy={loading} />
           <FilterPanel
             filters={filters}
             onToggle={toggle}
@@ -823,24 +841,28 @@ export default function Page() {
               ),
             )}
 
-            {/* 空会话给几个开口方式，别让人对着空白框发呆 */}
+            {/* 空会话给几个开口方式：桌面端的场景入口在左侧 Hero 卡里，
+                这份场景卡只在移动端显示（Hero 卡移动端隐藏，入口不能丢） */}
             {messages.length <= 1 && !loading && (
-              <div className="grid gap-3 pt-2 sm:grid-cols-3">
+              <div className="grid gap-3 pt-2 sm:grid-cols-3 lg:hidden">
                 {SCENES.map((s) => (
                   <button
                     key={s.title}
                     onClick={() => send(s.text)}
-                    className="group animate-fade-in rounded-2xl border border-cx-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-cx-300 hover:shadow-card"
+                    className="group animate-fade-in rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card"
                   >
                     <div className="mb-2 text-2xl">{s.icon}</div>
-                    <div className="font-bold text-cx-700">{s.title}</div>
-                    <div className="mt-0.5 text-xs leading-relaxed text-cx-400">{s.sub}</div>
+                    <div className="font-bold text-slate-700">{s.title}</div>
+                    <div className="mt-0.5 text-xs leading-relaxed text-slate-400">{s.sub}</div>
                   </button>
                 ))}
               </div>
             )}
 
-            {loading && (
+            {/* 骨架屏：loading 且还没收到首个 delta 时，给一个呼吸假气泡；
+                字开始流动后就回到“正在想”的点点点 */}
+            {waitingFirst && <SkeletonBubble />}
+            {!waitingFirst && loading && streamingStarted && (
               <div className="flex items-center gap-2 text-sm text-cx-400">
                 <span>🧸</span>
                 脆脆正在想
@@ -853,10 +875,10 @@ export default function Page() {
             )}
           </div>
 
-          {/* ── 输入区 ─────────────────────────── */}
-          <div className="shrink-0 border-t border-cx-100 bg-white/80 p-3 backdrop-blur">
+          {/* ── 输入区：悬浮圆角面板，微阴影，无生硬边框 ── */}
+          <div className="shrink-0 px-1 pb-1">
             <div className="mx-auto max-w-3xl">
-              {/* 空会话已经有场景卡了，快捷短语只在聊起来后露出来 */}
+              {/* 快捷短语只在聊起来后露出来 */}
               {messages.length > 1 && (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {QUICK.map((q) => (
@@ -864,7 +886,7 @@ export default function Page() {
                       key={q.text}
                       onClick={() => send(q.text)}
                       disabled={loading}
-                      className="inline-flex min-h-[40px] items-center rounded-full border border-cx-200 bg-cx-50 px-3.5 py-2 text-xs text-cx-600 transition hover:bg-cx-100 disabled:opacity-40"
+                      className="inline-flex min-h-[40px] items-center rounded-full border border-slate-200 bg-white px-3.5 py-2 text-xs text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-40"
                     >
                       <span className="mr-1">{q.icon}</span>
                       {q.label}
@@ -873,7 +895,7 @@ export default function Page() {
                 </div>
               )}
 
-              <div className="flex items-end gap-2">
+              <div className="flex items-end gap-2 rounded-3xl border border-slate-200/80 bg-white p-2.5 pl-4 shadow-lg shadow-slate-200/60">
                 <textarea
                   ref={inputRef}
                   rows={1}
@@ -886,12 +908,12 @@ export default function Page() {
                     }
                   }}
                   placeholder="说点什么...（Enter 发送，Shift+Enter 换行）"
-                  className="scroll-slim min-w-0 flex-1 resize-none rounded-bubble border border-cx-200 bg-white px-5 py-3 text-base leading-relaxed outline-none transition placeholder:text-cx-300 focus:border-cx-300 focus:ring-2 focus:ring-cx-100"
+                  className="scroll-slim min-w-0 flex-1 resize-none bg-transparent py-2 text-base leading-relaxed outline-none placeholder:text-slate-300"
                 />
                 <button
                   onClick={() => send()}
                   disabled={loading || !input.trim()}
-                  className="shrink-0 rounded-full bg-cx-300 px-6 py-3.5 text-base font-bold text-white shadow transition hover:bg-cx-400 disabled:opacity-40"
+                  className="shrink-0 rounded-full bg-cx-300 px-6 py-2.5 text-base font-bold text-white shadow transition hover:bg-cx-400 disabled:opacity-40"
                 >
                   发送
                 </button>

@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Activity, MessageSquareText, Package, Users } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { TrendChart } from '@/components/admin/trend-chart';
 
 interface Stats {
   totalUsers: number;
@@ -68,20 +69,20 @@ export function DashboardClient() {
         ))}
       </div>
 
-      {/* 趋势图占位：步骤 7 接图表库（recharts）画折线 */}
+      {/* 近 7 天对话趋势：recharts 面积折线图 */}
       <Card>
         <CardHeader>
           <CardTitle>近 7 天对话量趋势</CardTitle>
-          <CardDescription>
-            {stats
-              ? stats.trend7d.map((t) => `${t.date.slice(5)}=${t.count}`).join('  ')
-              : '加载中…'}
-          </CardDescription>
+          <CardDescription>每日对话轮次（含当日）</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex h-48 items-center justify-center rounded-lg border border-dashed border-slate-200 text-xs text-slate-400">
-            趋势图占位（折线图在 UI 打磨轮接入）
-          </div>
+          {stats ? (
+            <TrendChart data={stats.trend7d} />
+          ) : (
+            <div className="flex h-56 items-center justify-center text-xs text-slate-300">
+              加载中…
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
