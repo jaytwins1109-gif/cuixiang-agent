@@ -12,7 +12,7 @@ export function MsgTime({ ts, mine }: { ts?: number; mine?: boolean }) {
   if (!text) return null;
   return (
     <div className={`mt-1 flex ${mine ? 'justify-end' : 'justify-start'}`}>
-      <span className="msg-time px-1 text-[10px] leading-none text-cx-400/70">{text}</span>
+      <span className="msg-time px-1 text-[10px] leading-none text-slate-400">{text}</span>
     </div>
   );
 }
@@ -28,7 +28,7 @@ export function Bubble({ msg }: { msg: Msg }) {
           className={`max-w-[75%] whitespace-pre-wrap rounded-bubble px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
             mine
               ? 'rounded-br-md bg-cx-300 text-white'
-              : 'rounded-bl-md border border-cx-100 bg-white text-cx-700'
+              : 'rounded-bl-md bg-slate-100 text-slate-800'
           } ${msg.refreshed ? 'bubble-swap' : ''}`}
         >
           {msg.content}

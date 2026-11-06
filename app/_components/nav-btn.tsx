@@ -21,7 +21,7 @@ export function NavBtn({
       title={label}
       // whitespace-nowrap：360px 窄屏下顶栏会挤压 nav，不锁住的话
       // 「+ 新对话」会被压成竖排三个字（实测 92px 高），比触摸目标太小更难看
-      className="inline-flex min-h-[40px] items-center justify-center whitespace-nowrap rounded-full px-2.5 py-1.5 text-cx-600 transition hover:bg-cx-50 sm:px-3"
+      className="inline-flex min-h-[40px] items-center justify-center whitespace-nowrap rounded-full px-2.5 py-1.5 text-slate-600 transition hover:bg-slate-100 sm:px-3"
     >
       {children}
     </button>

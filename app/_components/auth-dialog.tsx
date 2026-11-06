@@ -59,8 +59,10 @@ export function AuthDialog({
       <div className="relative w-full max-w-sm animate-fade-in rounded-2xl bg-white p-5 shadow-xl">
         <div className="mb-1 flex items-start justify-between">
           <div>
-            <h2 className="text-base font-bold text-cx-700">{upgrading ? '注册个账号' : '登录'}</h2>
-            <p className="mt-1 text-xs leading-relaxed text-cx-400">
+            <h2 className="text-base font-bold text-slate-800">
+              {upgrading ? '注册个账号' : '登录'}
+            </h2>
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">
               {upgrading
                 ? '现在记住的忌口、口味都会跟着走，换手机也不丢'
                 : '登录后接着用你原来的记忆，一件不落'}
@@ -68,7 +70,7 @@ export function AuthDialog({
           </div>
           <button
             onClick={onClose}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-cx-400 hover:bg-cx-50"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"
             aria-label="关闭"
           >
             ✕
@@ -77,7 +79,7 @@ export function AuthDialog({
 
         <div className="mt-4 space-y-3">
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-cx-500">邮箱</span>
+            <span className="mb-1 block text-xs font-semibold text-slate-500">邮箱</span>
             <input
               type="email"
               value={email}
@@ -87,12 +89,12 @@ export function AuthDialog({
               }}
               placeholder="you@example.com"
               autoComplete="email"
-              className="w-full rounded-xl border border-cx-200 bg-white px-3.5 py-2.5 text-sm outline-none transition placeholder:text-cx-300 focus:border-cx-300 focus:ring-2 focus:ring-cx-100"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
             />
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-cx-500">密码</span>
+            <span className="mb-1 block text-xs font-semibold text-slate-500">密码</span>
             <input
               type="password"
               value={password}
@@ -102,7 +104,7 @@ export function AuthDialog({
               }}
               placeholder={`至少 ${MIN_PASSWORD} 位`}
               autoComplete={upgrading ? 'new-password' : 'current-password'}
-              className="w-full rounded-xl border border-cx-200 bg-white px-3.5 py-2.5 text-sm outline-none transition placeholder:text-cx-300 focus:border-cx-300 focus:ring-2 focus:ring-cx-100"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
             />
           </label>
 
@@ -125,7 +127,7 @@ export function AuthDialog({
               setLocalError(null);
               onSwitch(upgrading ? 'login' : 'upgrade');
             }}
-            className="w-full text-center text-xs text-cx-500 underline-offset-2 hover:underline"
+            className="w-full text-center text-xs text-slate-500 underline-offset-2 hover:underline"
           >
             {upgrading ? '我已有账号，直接登录' : '还没有账号？用当前记录注册一个'}
           </button>

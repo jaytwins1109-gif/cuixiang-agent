@@ -66,40 +66,16 @@
   }
 
   html {
-    /* 页根也铺上底色，滚动到边缘时不会露出白边 */
-    background-color: rgb(var(--cx-50));
+    /* 页根也铺上底色，滚动到边缘时不会露出白边。
+       V3.0 冻结后统一浅色：底色不再吃皮肤变量，避免暗色皮肤把白卡染黑 */
+    background-color: #f8fafc; /* slate-50 */
   }
 
   body {
-    @apply bg-cx-50 text-cx-700;
+    @apply bg-slate-50 text-slate-800;
     font-family:
       -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
       system-ui, sans-serif;
-  }
-
-  /**
-   * 深色皮肤下把写死的白底换成面板色。
-   * 用 [class*=] 模糊匹配，bg-white / bg-white/80 / bg-white/85 一次全覆盖，
-   * 省得逐个组件改 className。
-   */
-  [data-theme='obsidian'] [class*='bg-white'] {
-    background-color: rgb(var(--cx-surface));
-  }
-
-  /* 深色下图片在暗卡片里太跳，压一点亮度 */
-  [data-theme='obsidian'] img {
-    filter: brightness(0.9);
-  }
-
-  /* 换皮肤只给大面积底色做缓冲，hover 这类微交互保持原本的干脆 */
-  [data-theme] body,
-  [data-theme] header,
-  [data-theme] aside,
-  [data-theme] [class*='bg-white'] {
-    transition:
-      background-color 0.25s ease,
-      color 0.25s ease,
-      border-color 0.25s ease;
   }
 }
 

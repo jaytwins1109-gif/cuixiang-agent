@@ -43,8 +43,8 @@ export function FilterPanel({
         onPick={(v) => onToggle('budget', v)}
       />
 
-      <div className="rounded-2xl border border-cx-200 bg-cx-50 p-3">
-        <div className="mb-2 text-xs font-bold text-cx-500">当前偏好</div>
+      <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="mb-2 text-xs font-bold text-slate-500">当前偏好</div>
 
         {/* 手选的：这次说了要什么 */}
         {active.length > 0 && (
@@ -63,17 +63,17 @@ export function FilterPanel({
         {/* 长期记住的：聊出来过，跨会话一直生效 */}
         {remembered.length > 0 && (
           <div className={active.length ? 'mt-2' : ''}>
-            <div className="mb-1 text-[11px] text-cx-400">一直记着</div>
+            <div className="mb-1 text-[11px] text-slate-400">一直记着</div>
             <div className="flex flex-wrap gap-1.5">
               {shownRemembered.map(([k, v]) => (
                 <span
                   key={k}
-                  className="inline-flex items-center gap-1 rounded-full border border-cx-300 bg-white px-2.5 py-1 text-xs font-semibold text-cx-600"
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 shadow-sm"
                 >
                   {PROFILE_LABEL[k] || k}·{v}
                   <button
                     onClick={() => onForget(k)}
-                    className="text-cx-300 hover:text-cx-600"
+                    className="text-slate-300 hover:text-slate-600"
                     aria-label="忘掉这条"
                   >
                     ✕
@@ -83,7 +83,7 @@ export function FilterPanel({
               {hiddenCount > 0 && (
                 <button
                   onClick={() => setShowAllProfile(true)}
-                  className="inline-flex min-h-[40px] items-center rounded-full border border-dashed border-cx-300 px-3 py-1 text-xs font-semibold text-cx-500 hover:bg-cx-50"
+                  className="inline-flex min-h-[40px] items-center rounded-full border border-dashed border-slate-300 px-3 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
                 >
                   +{hiddenCount}
                 </button>
@@ -91,7 +91,7 @@ export function FilterPanel({
               {showAllProfile && remembered.length > 3 && (
                 <button
                   onClick={() => setShowAllProfile(false)}
-                  className="inline-flex min-h-[40px] items-center rounded-full px-3 py-1 text-xs text-cx-400 hover:text-cx-600"
+                  className="inline-flex min-h-[40px] items-center rounded-full px-3 py-1 text-xs text-slate-400 hover:text-slate-600"
                 >
                   收起
                 </button>
@@ -101,20 +101,20 @@ export function FilterPanel({
         )}
 
         {!active.length && !remembered.length && (
-          <p className="text-xs text-cx-400">还没选，脆脆会按你聊天里的意思来</p>
+          <p className="text-xs text-slate-400">还没选，脆脆会按你聊天里的意思来</p>
         )}
 
         {active.length > 0 && (
           <button
             onClick={onClear}
-            className="mt-2 text-xs text-cx-500 underline-offset-2 hover:underline"
+            className="mt-2 text-xs text-slate-500 underline-offset-2 hover:underline"
           >
             清空手选
           </button>
         )}
       </div>
 
-      <p className="text-[11px] leading-relaxed text-cx-400">
+      <p className="text-[11px] leading-relaxed text-slate-400">
         选了之后直接说「来点吃的」就行，不用再重复口味。「一直记着」是从聊天里攒下来的，长期生效。
       </p>
     </div>
@@ -134,7 +134,7 @@ function FilterGroup({
 }) {
   return (
     <div>
-      <h3 className="mb-2 text-xs font-bold tracking-wider text-cx-400">{title}</h3>
+      <h3 className="mb-2 text-xs font-bold tracking-wider text-slate-400">{title}</h3>
       <div className="flex flex-wrap gap-2">
         {items.map((it) => {
           const on = value === it.label;
@@ -145,7 +145,7 @@ function FilterGroup({
               className={`inline-flex min-h-[40px] items-center rounded-full border px-3 py-1.5 text-xs transition ${
                 on
                   ? 'border-cx-500 bg-cx-500 font-semibold text-white shadow'
-                  : 'border-cx-200 bg-white text-cx-600 hover:bg-cx-50'
+                  : 'border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50'
               }`}
             >
               <span className="mr-1">{it.icon}</span>

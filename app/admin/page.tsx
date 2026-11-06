@@ -52,21 +52,21 @@ export default async function AdminPage() {
   if (!authed) {
     return (
       <Shell>
-        <h1 className="mb-1 text-xl font-extrabold text-cx-600">脆香后台</h1>
-        <p className="mb-5 text-xs text-cx-400">输入管理口令进入</p>
+        <h1 className="mb-1 text-xl font-extrabold text-slate-800">脆香后台</h1>
+        <p className="mb-5 text-xs text-slate-400">输入管理口令进入</p>
         <form action={login} className="space-y-3">
           <input
             type="password"
             name="password"
             placeholder="管理口令"
-            className="w-full rounded-xl border border-cx-200 px-4 py-2.5 text-sm outline-none focus:border-cx-300 focus:ring-2 focus:ring-cx-100"
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
           />
           <button className="w-full rounded-xl bg-cx-300 py-2.5 text-sm font-bold text-white transition hover:bg-cx-400">
             进入
           </button>
         </form>
-        <p className="mt-4 text-[11px] leading-relaxed text-cx-400">
-          口令用 <code className="rounded bg-cx-50 px-1">ADMIN_PASSWORD_HASH</code>{' '}
+        <p className="mt-4 text-[11px] leading-relaxed text-slate-400">
+          口令用 <code className="rounded bg-slate-100 px-1">ADMIN_PASSWORD_HASH</code>{' '}
           配置，取明文口令的 sha256。改完记得重启 dev。
         </p>
       </Shell>
@@ -79,8 +79,8 @@ export default async function AdminPage() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-cx-50 p-6">
-      <div className="w-full max-w-md rounded-3xl border border-cx-100 bg-cx-50/60 p-6 shadow-card">
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
         {children}
       </div>
     </main>
@@ -90,8 +90,8 @@ function Shell({ children }: { children: React.ReactNode }) {
 function Notice({ children }: { children: React.ReactNode }) {
   return (
     <Shell>
-      <p className="text-sm text-cx-600">{children}</p>
-      <p className="mt-3 text-[11px] leading-relaxed text-cx-400">
+      <p className="text-sm text-slate-700">{children}</p>
+      <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
         生成方式：
         <code className="mt-1 block rounded bg-white px-2 py-1.5 text-[11px]">
           node -e
