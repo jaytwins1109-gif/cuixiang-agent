@@ -25,10 +25,8 @@ export function Bubble({ msg }: { msg: Msg }) {
       <div className={`flex items-end gap-2 ${mine ? 'justify-end' : ''}`}>
         {!mine && <span className="mb-1 text-xl">🧸</span>}
         <div
-          className={`max-w-[75%] whitespace-pre-wrap rounded-bubble px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
-            mine
-              ? 'rounded-br-md bg-cx-300 text-white'
-              : 'rounded-bl-md bg-slate-100 text-slate-800'
+          className={`max-w-[75%] whitespace-pre-wrap px-4 py-2.5 text-sm leading-relaxed ${
+            mine ? 'rounded-bubble rounded-br-md bg-cx-300 text-white shadow-sm' : 'text-slate-800'
           } ${msg.refreshed ? 'bubble-swap' : ''}`}
         >
           {msg.content}

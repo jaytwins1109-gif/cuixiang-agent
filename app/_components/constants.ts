@@ -24,37 +24,44 @@ export const BUDGETS = [
   { label: '60元以上', icon: '👑' },
 ];
 
-/** 聊起来后的快捷开口：给场景，不给"来点甜的"这种跟卡片按钮重复的话 */
+/** 聊起来后的快捷开口：给场景，不给重复的话 */
 export const QUICK = [
-  { label: '追剧来点', icon: '🎬', text: '追剧的时候来点吃的' },
-  { label: '去海边带点', icon: '🌊', text: '明天去看海，带点吃的' },
-  { label: '加班垫垫', icon: '💻', text: '加班熬夜，来点垫肚子的' },
-  { label: '换一批', icon: '🔄', text: '换一批' },
+  { label: '查工资条', icon: '💵', text: '帮我查下这个月的工资条' },
+  { label: '请一天假', icon: '🌴', text: '我想请一天假' },
+  { label: '连办公WiFi', icon: '📶', text: '办公室WiFi怎么连' },
+  { label: '订会议室', icon: '📅', text: '帮我订一间下午的会议室' },
 ];
 
-/** 空会话时的场景入口：给个具体的开口方式，别让人对着空白框发呆 */
+/** 空会话时的欢迎区块快捷卡（grid-cols-2 四张，对齐参考稿） */
 export const SCENES = [
   {
-    icon: '🎬',
-    title: '追剧解馋',
-    sub: '看点剧，嘴别闲着',
-    text: '追剧的时候来点吃的',
+    icon: '📅',
+    title: '查询年假',
+    sub: '看看今年还剩几天',
+    text: '帮我查一下年假余额',
   },
   {
-    icon: '🌊',
-    title: '出去玩带点',
-    sub: '海边爬山能扛饿的',
-    text: '明天去看海，带点吃的',
+    icon: '🖥️',
+    title: '职场办公',
+    sub: 'WiFi、门禁、设备申请',
+    text: '办公室的WiFi怎么连',
   },
   {
-    icon: '😮‍💨',
-    title: '烦了想发泄',
-    sub: '不想说话也行',
-    text: '今天被领导当众骂了，烦死',
+    icon: '🧑‍💼',
+    title: '入职人事指南',
+    sub: '新人第一天要做什么',
+    text: '我是新员工，入职流程是什么',
+  },
+  {
+    icon: '🗓️',
+    title: '请假与考勤',
+    sub: '请假、补卡、考勤规则',
+    text: '请假流程怎么走',
   },
 ];
 
-export const WELCOME = '嘿，我是脆脆 🥜\n馋了直接说，想找人说话也行。\n对了——今天咋样？';
+export const WELCOME =
+  '体验员工，你好 👋\n今天有什么可以帮你的？\n可以选下面的话题，也可以在输入框直接提问。';
 
 /** 聊天记录 + 左侧偏好存本地，刷新页面不丢 */
 export const STORE_KEY = 'cx_chat_v1';

@@ -721,413 +721,427 @@ export default function Page() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
-      {/* ── 顶栏（白底通透，右上角高频入口）────────── */}
-      <header className="z-20 flex shrink-0 items-center gap-3 bg-white/70 px-4 py-3 backdrop-blur">
-        <button
-          onClick={() => setDrawer(true)}
-          className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 lg:hidden"
-          aria-label="打开口味栏"
-        >
-          <span className="text-lg">☰</span>
-        </button>
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 sm:p-6">
+      <div className="flex h-[90vh] w-full max-w-[1200px] gap-6">
+        {/* ── 左侧品牌卡（深色沉浸式，桌面常驻）────────── */}
+        <aside className="hidden w-[300px] shrink-0 lg:block">
+          <HeroCard onScene={(t) => void send(t)} busy={loading} />
+        </aside>
 
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-2xl">🥜</span>
-          <span className="whitespace-nowrap text-lg font-extrabold tracking-wide text-slate-800">
-            脆香零食
-          </span>
-          <span className="hidden text-xs text-slate-400 sm:inline">你的零食推荐好友</span>
-        </div>
+        {/* ── 口味/偏好抽屉（桌面点 ☰ 也从这里开）─── */}
+        {drawer && (
+          <div className="fixed inset-0 z-40">
+            <div className="absolute inset-0 bg-black/30" onClick={() => setDrawer(false)} />
+            <div className="absolute left-0 top-0 h-full w-80 animate-fade-in overflow-y-auto bg-white p-4 shadow-xl">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="font-bold text-slate-700">挑个口味</span>
+                <button
+                  onClick={() => setDrawer(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg p-1 text-slate-400 hover:bg-slate-50"
+                  aria-label="关闭"
+                >
+                  ✕
+                </button>
+              </div>
+              <FilterPanel
+                filters={filters}
+                onToggle={toggle}
+                onClear={clearFilters}
+                active={active}
+                profile={profile}
+                onForget={forgetProfile}
+              />
+            </div>
+          </div>
+        )}
 
-        {/*
-          右上角只留两个高频入口：新对话（文字常驻）+ 我的（头像 + 想要数徽标）。
-          「推荐」压成图标保留——它是无输入直达推荐的最短路径。
-        */}
-        <nav className="ml-auto flex items-center gap-1 text-sm sm:gap-1.5">
-          <button
-            onClick={newChat}
-            className="inline-flex min-h-[40px] items-center whitespace-nowrap rounded-full bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:bg-slate-50"
-          >
-            ＋ 新对话
-          </button>
-          <NavBtn onClick={() => send('推荐个零食')} label="推荐零食">
-            <span>🍿</span>
-          </NavBtn>
-          <NavBtn onClick={() => setMyOpen(true)} label="我的清单与长期偏好">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-600">
-              👤
-            </span>
-            {wantList.length > 0 && (
-              <span className="ml-0.5 rounded-full bg-cx-300 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                {wantList.length}
+        {/* ── 右侧聊天区 ──────────────────────── */}
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          {/* Header：h-16，底边极细分割线 */}
+          <header className="flex h-16 shrink-0 items-center gap-2 border-b border-slate-100 px-4 sm:gap-3 sm:px-5">
+            {/* ☰：口味/偏好抽屉入口（桌面移动都在这） */}
+            <button
+              onClick={() => setDrawer(true)}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100"
+              aria-label="口味与偏好筛选"
+            >
+              <span className="text-lg">☰</span>
+            </button>
+
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-200 to-orange-300 text-lg">
+                🥜
               </span>
-            )}
-          </NavBtn>
-          {/* 换皮肤：就一个小色点，不占地方，想换的时候才点开 */}
-          <ThemeSwitch theme={theme} onChange={changeTheme} />
-        </nav>
-      </header>
-
-      <div className="flex min-h-0 flex-1 justify-center">
-        <div className="flex h-full w-full max-w-5xl gap-6 px-4 py-5">
-          {/* ── 左侧：信息卡片 + 口味栏（桌面常驻）─────── */}
-          <aside className="hidden w-80 shrink-0 space-y-4 lg:block">
-            <HeroCard onScene={(t) => void send(t)} busy={loading} />
-            <FilterPanel
-              filters={filters}
-              onToggle={toggle}
-              onClear={clearFilters}
-              active={active}
-              profile={profile}
-              onForget={forgetProfile}
-            />
-          </aside>
-
-          {/* ── 移动端抽屉 ───────────────────────── */}
-          {drawer && (
-            <div className="fixed inset-0 z-40 lg:hidden">
-              <div className="absolute inset-0 bg-black/30" onClick={() => setDrawer(false)} />
-              <div className="absolute left-0 top-0 h-full w-72 animate-fade-in bg-white p-4 shadow-xl">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="font-bold text-slate-700">挑个口味</span>
-                  <button
-                    onClick={() => setDrawer(false)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg p-1 text-slate-400 hover:bg-slate-50"
-                    aria-label="关闭"
-                  >
-                    ✕
-                  </button>
+              <div className="min-w-0">
+                <div className="whitespace-nowrap text-sm font-bold text-slate-800">和脆脆聊聊</div>
+                <div className="hidden text-[11px] text-slate-400 sm:block">
+                  在线 · 一般秒回 · 记得你说过的话
                 </div>
-                <FilterPanel
-                  filters={filters}
-                  onToggle={toggle}
-                  onClear={clearFilters}
-                  active={active}
-                  profile={profile}
-                  onForget={forgetProfile}
-                />
               </div>
             </div>
-          )}
 
-          {/* ── 右侧聊天区 ──────────────────────── */}
-          <main className="flex min-w-0 flex-1 flex-col">
-            <div ref={listRef} className="scroll-slim flex-1 space-y-4 overflow-y-auto p-4">
-              {messages.map((m, i) =>
-                m.cards ? (
-                  <div key={i}>
-                    {/* 推荐话术先出气泡，再接卡片：只有三张卡的推荐太像自动售货机 */}
-                    {m.content.trim() && <Bubble msg={{ ...m, cards: undefined }} />}
-                    <div
-                      className={`grid gap-2 sm:grid-cols-2 xl:grid-cols-3 ${
-                        m.content.trim() ? 'mt-3' : ''
-                      }`}
-                    >
-                      {m.cards.map((c, j) => (
-                        <SnackCard
-                          key={j}
-                          rec={c}
-                          wanted={wantList.some((w) => w.name === c.name)}
-                          onWant={() => addWant(c)}
-                          onSwap={() => send('换一批')}
-                        />
-                      ))}
-                    </div>
-                    {/* 卡片组也有发送时间，跟气泡对齐在同一种样式里 */}
-                    <MsgTime ts={m.ts} />
+            <nav className="ml-auto flex items-center gap-1 text-sm sm:gap-1.5">
+              <button
+                onClick={newChat}
+                className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-full bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:bg-slate-50"
+              >
+                ＋ 新对话
+              </button>
+              <NavBtn onClick={() => setMyOpen(true)} label="历史记录与长期偏好">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-xs text-slate-600">
+                  👤
+                </span>
+                {wantList.length > 0 && (
+                  <span className="ml-0.5 rounded-full bg-cx-300 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {wantList.length}
+                  </span>
+                )}
+              </NavBtn>
+              {/* 换皮肤：就一个小色点，不占地方，想换的时候才点开 */}
+              <ThemeSwitch theme={theme} onChange={changeTheme} />
+            </nav>
+          </header>
+
+          <div
+            ref={listRef}
+            className="scroll-slim flex-1 space-y-4 overflow-y-auto bg-white px-6 py-5"
+          >
+            {messages.map((m, i) =>
+              // 无历史时首条欢迎语由下方欢迎区块承担，不重复渲染旧式气泡
+              i === 0 && messages.length <= 1 && m.content === WELCOME ? null : m.cards ? (
+                <div key={i}>
+                  {/* 推荐话术先出气泡，再接卡片：只有三张卡的推荐太像自动售货机 */}
+                  {m.content.trim() && <Bubble msg={{ ...m, cards: undefined }} />}
+                  <div
+                    className={`grid gap-2 sm:grid-cols-2 xl:grid-cols-3 ${
+                      m.content.trim() ? 'mt-3' : ''
+                    }`}
+                  >
+                    {m.cards.map((c, j) => (
+                      <SnackCard
+                        key={j}
+                        rec={c}
+                        wanted={wantList.some((w) => w.name === c.name)}
+                        onWant={() => addWant(c)}
+                        onSwap={() => send('换一批')}
+                      />
+                    ))}
                   </div>
-                ) : (
-                  <Bubble key={i} msg={m} />
-                ),
-              )}
+                  {/* 卡片组也有发送时间，跟气泡对齐在同一种样式里 */}
+                  <MsgTime ts={m.ts} />
+                </div>
+              ) : (
+                <Bubble key={i} msg={m} />
+              ),
+            )}
 
-              {/* 空会话给几个开口方式：桌面端的场景入口在左侧 Hero 卡里，
-                这份场景卡只在移动端显示（Hero 卡移动端隐藏，入口不能丢） */}
-              {messages.length <= 1 && !loading && (
-                <div className="grid gap-3 pt-2 sm:grid-cols-3 lg:hidden">
+            {/* 欢迎区块：仅在无历史消息时展示（对齐参考稿，全端可见） */}
+            {messages.length <= 1 && !loading && (
+              <div className="animate-fade-in pb-2 pt-4">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-500">
+                  ✨ 员工数字助手
+                </span>
+                <h2 className="mt-3 text-2xl font-extrabold text-slate-800">体验员工，你好 👋</h2>
+                <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-400">
+                  今天有什么可以帮你的？
+                  <br />
+                  可以选下面的话题，也可以在输入框直接提问。
+                </p>
+
+                {/* 四张快捷提问卡：细边框圆角，hover 轻微上浮 */}
+                <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {SCENES.map((s) => (
                     <button
                       key={s.title}
                       onClick={() => send(s.text)}
                       className="group animate-fade-in rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card"
                     >
-                      <div className="mb-2 text-2xl">{s.icon}</div>
-                      <div className="font-bold text-slate-700">{s.title}</div>
+                      <div className="flex items-start justify-between">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-lg">
+                          {s.icon}
+                        </div>
+                        <span className="text-xs text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500">
+                          →
+                        </span>
+                      </div>
+                      <div className="mt-2.5 font-bold text-slate-700">{s.title}</div>
                       <div className="mt-0.5 text-xs leading-relaxed text-slate-400">{s.sub}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 骨架屏：loading 且还没收到首个 delta 时，给一个呼吸假气泡；
+                字开始流动后就回到“正在想”的点点点 */}
+            {waitingFirst && <SkeletonBubble />}
+            {!waitingFirst && loading && streamingStarted && (
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span>🧸</span>
+                脆脆正在想
+                <span className="dot-typing flex gap-1">
+                  <span>·</span>
+                  <span>·</span>
+                  <span>·</span>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* ── 输入区：固定在卡片底部，p-4 + 顶部分割线 ── */}
+          <div className="shrink-0 border-t border-slate-100 p-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 transition focus-within:ring-2 focus-within:ring-slate-200">
+              {/* 快捷短语：输入容器内部上方的小按钮行 */}
+              {messages.length > 1 && (
+                <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+                  {QUICK.map((q) => (
+                    <button
+                      key={q.text}
+                      onClick={() => send(q.text)}
+                      disabled={loading}
+                      className="inline-flex min-h-[32px] items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600 transition hover:bg-slate-100 disabled:opacity-40"
+                    >
+                      <span className="mr-1">{q.icon}</span>
+                      {q.label}
                     </button>
                   ))}
                 </div>
               )}
 
-              {/* 骨架屏：loading 且还没收到首个 delta 时，给一个呼吸假气泡；
-                字开始流动后就回到“正在想”的点点点 */}
-              {waitingFirst && <SkeletonBubble />}
-              {!waitingFirst && loading && streamingStarted && (
-                <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <span>🧸</span>
-                  脆脆正在想
-                  <span className="dot-typing flex gap-1">
-                    <span>·</span>
-                    <span>·</span>
-                    <span>·</span>
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* ── 输入区：悬浮圆角面板，微阴影，无生硬边框 ── */}
-            <div className="shrink-0 px-1 pb-1">
-              <div className="mx-auto max-w-3xl">
-                {/* 快捷短语只在聊起来后露出来 */}
-                {messages.length > 1 && (
-                  <div className="mb-2 flex flex-wrap gap-2">
-                    {QUICK.map((q) => (
-                      <button
-                        key={q.text}
-                        onClick={() => send(q.text)}
-                        disabled={loading}
-                        className="inline-flex min-h-[40px] items-center rounded-full border border-slate-200 bg-white px-3.5 py-2 text-xs text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-40"
-                      >
-                        <span className="mr-1">{q.icon}</span>
-                        {q.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex items-end gap-2 rounded-3xl border border-slate-200/80 bg-white p-2.5 pl-4 shadow-lg shadow-slate-200/60">
-                  <textarea
-                    ref={inputRef}
-                    rows={1}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        send();
-                      }
-                    }}
-                    placeholder="说点什么...（Enter 发送，Shift+Enter 换行）"
-                    className="scroll-slim min-w-0 flex-1 resize-none bg-transparent py-2 text-base leading-relaxed outline-none placeholder:text-slate-300"
-                  />
-                  <button
-                    onClick={() => send()}
-                    disabled={loading || !input.trim()}
-                    className="shrink-0 rounded-full bg-cx-300 px-6 py-2.5 text-base font-bold text-white shadow transition hover:bg-cx-400 disabled:opacity-40"
-                  >
-                    发送
-                  </button>
-                </div>
+              <div className="flex items-end gap-2 p-2 pl-3">
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                  placeholder="输入你的问题，例如：我还有几天年假？"
+                  className="scroll-slim min-w-0 flex-1 resize-none bg-transparent py-2 text-sm leading-relaxed outline-none placeholder:text-slate-400"
+                />
+                <button
+                  onClick={() => send()}
+                  disabled={loading || !input.trim()}
+                  className="shrink-0 rounded-full bg-cx-300 px-5 py-2 text-sm font-bold text-white shadow transition hover:bg-cx-400 disabled:opacity-40"
+                >
+                  发送
+                </button>
               </div>
             </div>
-          </main>
+            <p className="mt-2 text-center text-[10px] text-slate-300">
+              内容由 AI 生成，仅供参考 · Enter 发送，Shift+Enter 换行
+            </p>
+          </div>
+        </main>
 
-          {/* ── 「我的」抽屉：想要清单 + 长期偏好 ──── */}
-          {myOpen && (
-            <div className="fixed inset-0 z-50">
-              <div className="absolute inset-0 bg-black/30" onClick={() => setMyOpen(false)} />
-              <div className="absolute right-0 top-0 h-full w-80 animate-fade-in overflow-y-auto bg-white p-4 shadow-xl">
-                <div className="mb-4 flex items-center justify-between">
-                  <span className="font-bold text-slate-700">我的</span>
-                  <button
-                    onClick={() => setMyOpen(false)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg p-1 text-slate-400 hover:bg-slate-50"
-                    aria-label="关闭"
-                  >
-                    ✕
-                  </button>
-                </div>
+        {/* ── 「我的」抽屉：想要清单 + 长期偏好 ──── */}
+        {myOpen && (
+          <div className="fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-black/30" onClick={() => setMyOpen(false)} />
+            <div className="absolute right-0 top-0 h-full w-80 animate-fade-in overflow-y-auto bg-white p-4 shadow-xl">
+              <div className="mb-4 flex items-center justify-between">
+                <span className="font-bold text-slate-700">我的</span>
+                <button
+                  onClick={() => setMyOpen(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg p-1 text-slate-400 hover:bg-slate-50"
+                  aria-label="关闭"
+                >
+                  ✕
+                </button>
+              </div>
 
-                {/*
+              {/*
                 账号区放在最上面：游客态是"记忆只跟着这台浏览器走"，
                 这句话不显眼就不会有人去注册，而清一次缓存他的忌口就没了。
               */}
-                <section className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  <h3 className="mb-2 text-xs font-bold tracking-wider text-slate-400">账号</h3>
-                  {auth.loading ? (
-                    <p className="text-xs text-slate-400">正在读取账号…</p>
-                  ) : auth.email ? (
-                    <div className="flex items-center gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-slate-800">
-                          {auth.email}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-slate-400">
-                          换设备登录也不会丢记忆
-                        </div>
+              <section className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <h3 className="mb-2 text-xs font-bold tracking-wider text-slate-400">账号</h3>
+                {auth.loading ? (
+                  <p className="text-xs text-slate-400">正在读取账号…</p>
+                ) : auth.email ? (
+                  <div className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-slate-800">
+                        {auth.email}
                       </div>
+                      <div className="mt-0.5 text-[11px] text-slate-400">
+                        换设备登录也不会丢记忆
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => void handleLogout()}
+                      className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      退出
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[11px] leading-relaxed text-slate-400">
+                      你现在是游客，记住的东西只跟着这台浏览器走，清缓存就没了。
+                    </p>
+                    <div className="mt-2 flex gap-2">
                       <button
-                        onClick={() => void handleLogout()}
+                        onClick={() => openAuth('upgrade')}
+                        className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-full bg-cx-300 px-3 py-1 text-[11px] font-bold text-white hover:bg-cx-400"
+                      >
+                        注册（保留现在的记忆）
+                      </button>
+                      <button
+                        onClick={() => openAuth('login')}
                         className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
                       >
-                        退出
+                        登录
                       </button>
                     </div>
-                  ) : (
-                    <>
-                      <p className="text-[11px] leading-relaxed text-slate-400">
-                        你现在是游客，记住的东西只跟着这台浏览器走，清缓存就没了。
-                      </p>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          onClick={() => openAuth('upgrade')}
-                          className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-full bg-cx-300 px-3 py-1 text-[11px] font-bold text-white hover:bg-cx-400"
-                        >
-                          注册（保留现在的记忆）
-                        </button>
-                        <button
-                          onClick={() => openAuth('login')}
-                          className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                        >
-                          登录
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </section>
+                  </>
+                )}
+              </section>
 
-                <section className="mb-6">
-                  <h3 className="mb-2 text-xs font-bold tracking-wider text-slate-400">想要清单</h3>
-                  {wantList.length ? (
-                    <>
-                      <ul className="space-y-2">
-                        {wantList.map((w) => (
-                          <li
-                            key={w.name}
-                            className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
-                          >
-                            <span className="text-lg">{w.emoji || '🍪'}</span>
-                            <span className="min-w-0 flex-1 truncate text-sm text-slate-800">
-                              {w.name}
-                            </span>
-                            <span className="shrink-0 text-xs font-bold text-slate-500">
-                              ¥{finalPrice(w)}
-                              {w.promo && w.promo.saved > 0 && (
-                                <span className="ml-1 font-normal text-slate-400 line-through">
-                                  ¥{w.price}
-                                </span>
-                              )}
-                            </span>
-                            <button
-                              onClick={() =>
-                                setWantList((prev) => prev.filter((x) => x.name !== w.name))
-                              }
-                              className="inline-flex h-10 w-10 shrink-0 items-center justify-center text-xs text-slate-400 hover:text-slate-700"
-                              aria-label="删掉"
-                            >
-                              ✕
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="mt-3 flex items-center justify-between text-xs">
-                        <span className="text-slate-500">
-                          合计 ¥{wantList.reduce((n, w) => n + finalPrice(w), 0).toFixed(1)}
-                          {wantList.some((w) => (w.promo?.saved || 0) > 0) && (
-                            <span className="ml-1 text-slate-400">
-                              （已省 ¥
-                              {wantList.reduce((n, w) => n + (w.promo?.saved || 0), 0).toFixed(1)}）
-                            </span>
-                          )}
-                        </span>
-                        <button
-                          onClick={() => setWantList([])}
-                          className="text-slate-400 underline-offset-2 hover:underline"
+              <section className="mb-6">
+                <h3 className="mb-2 text-xs font-bold tracking-wider text-slate-400">想要清单</h3>
+                {wantList.length ? (
+                  <>
+                    <ul className="space-y-2">
+                      {wantList.map((w) => (
+                        <li
+                          key={w.name}
+                          className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
                         >
-                          清空
-                        </button>
-                      </div>
-
-                      {/* 凑单建议：清单里任意一款能凑出更高档优惠时给个一键加购 */}
-                      {addOnTip && (
-                        <div className="mt-2 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
-                          <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-slate-700">
-                            再加份{addOnTip.name}（¥{addOnTip.gap}），这单能多省 ¥
-                            {addOnTip.extra_saved}
+                          <span className="text-lg">{w.emoji || '🍪'}</span>
+                          <span className="min-w-0 flex-1 truncate text-sm text-slate-800">
+                            {w.name}
+                          </span>
+                          <span className="shrink-0 text-xs font-bold text-slate-500">
+                            ¥{finalPrice(w)}
+                            {w.promo && w.promo.saved > 0 && (
+                              <span className="ml-1 font-normal text-slate-400 line-through">
+                                ¥{w.price}
+                              </span>
+                            )}
                           </span>
                           <button
                             onClick={() =>
-                              setWantList((prev) =>
-                                prev.some((x) => x.name === addOnTip.name)
-                                  ? prev
-                                  : [
-                                      ...prev,
-                                      {
-                                        name: addOnTip.name,
-                                        price: addOnTip.gap,
-                                        reason: '凑单加购',
-                                      },
-                                    ],
-                              )
+                              setWantList((prev) => prev.filter((x) => x.name !== w.name))
                             }
-                            className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full bg-cx-300 px-3 py-1 text-[11px] font-semibold text-white hover:bg-cx-400"
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center text-xs text-slate-400 hover:text-slate-700"
+                            aria-label="删掉"
                           >
-                            加一份
+                            ✕
                           </button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-xs text-slate-400">
-                      还没挑中什么。卡片上点「想要」就存这儿了。
-                    </p>
-                  )}
-                </section>
-
-                <section>
-                  <h3 className="mb-2 text-xs font-bold tracking-wider text-slate-400">
-                    记住你的偏好
-                  </h3>
-                  {hasMemory ? (
-                    <>
-                      <div className="flex flex-wrap gap-1.5">
-                        {serverMemory.map(({ text, tag }) => (
-                          <span
-                            key={text}
-                            className="inline-flex items-center gap-1 rounded-full bg-cx-300 px-2.5 py-1 text-xs font-semibold text-white"
-                          >
-                            {tag}·{text.split('：').slice(1).join('：') || text}
-                            <button
-                              onClick={() => forgetMemoryEntry(text)}
-                              className="opacity-70 hover:opacity-100"
-                              aria-label="忘掉这条"
-                            >
-                              ✕
-                            </button>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 flex items-center justify-between text-xs">
+                      <span className="text-slate-500">
+                        合计 ¥{wantList.reduce((n, w) => n + finalPrice(w), 0).toFixed(1)}
+                        {wantList.some((w) => (w.promo?.saved || 0) > 0) && (
+                          <span className="ml-1 text-slate-400">
+                            （已省 ¥
+                            {wantList.reduce((n, w) => n + (w.promo?.saved || 0), 0).toFixed(1)}）
                           </span>
-                        ))}
-                        {localOnly.map(([k, v]) => (
-                          <span
-                            key={k}
-                            className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700"
-                          >
-                            {PROFILE_LABEL[k] || k}·{v}
-                            <button
-                              onClick={() => forgetProfile(k)}
-                              className="opacity-70 hover:opacity-100"
-                              aria-label="忘掉这条"
-                            >
-                              ✕
-                            </button>
-                          </span>
-                        ))}
-                      </div>
+                        )}
+                      </span>
                       <button
-                        onClick={() => forgetAll()}
-                        className="mt-3 text-xs text-slate-400 underline-offset-2 hover:underline"
+                        onClick={() => setWantList([])}
+                        className="text-slate-400 underline-offset-2 hover:underline"
                       >
-                        全都忘掉
+                        清空
                       </button>
-                    </>
-                  ) : (
-                    <p className="text-xs text-slate-400">聊着聊着就记住了，比如你说过"不吃辣"。</p>
-                  )}
-                </section>
-              </div>
+                    </div>
+
+                    {/* 凑单建议：清单里任意一款能凑出更高档优惠时给个一键加购 */}
+                    {addOnTip && (
+                      <div className="mt-2 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                        <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-slate-700">
+                          再加份{addOnTip.name}（¥{addOnTip.gap}），这单能多省 ¥
+                          {addOnTip.extra_saved}
+                        </span>
+                        <button
+                          onClick={() =>
+                            setWantList((prev) =>
+                              prev.some((x) => x.name === addOnTip.name)
+                                ? prev
+                                : [
+                                    ...prev,
+                                    {
+                                      name: addOnTip.name,
+                                      price: addOnTip.gap,
+                                      reason: '凑单加购',
+                                    },
+                                  ],
+                            )
+                          }
+                          className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full bg-cx-300 px-3 py-1 text-[11px] font-semibold text-white hover:bg-cx-400"
+                        >
+                          加一份
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-400">
+                    还没挑中什么。卡片上点「想要」就存这儿了。
+                  </p>
+                )}
+              </section>
+
+              <section>
+                <h3 className="mb-2 text-xs font-bold tracking-wider text-slate-400">
+                  记住你的偏好
+                </h3>
+                {hasMemory ? (
+                  <>
+                    <div className="flex flex-wrap gap-1.5">
+                      {serverMemory.map(({ text, tag }) => (
+                        <span
+                          key={text}
+                          className="inline-flex items-center gap-1 rounded-full bg-cx-300 px-2.5 py-1 text-xs font-semibold text-white"
+                        >
+                          {tag}·{text.split('：').slice(1).join('：') || text}
+                          <button
+                            onClick={() => forgetMemoryEntry(text)}
+                            className="opacity-70 hover:opacity-100"
+                            aria-label="忘掉这条"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                      {localOnly.map(([k, v]) => (
+                        <span
+                          key={k}
+                          className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700"
+                        >
+                          {PROFILE_LABEL[k] || k}·{v}
+                          <button
+                            onClick={() => forgetProfile(k)}
+                            className="opacity-70 hover:opacity-100"
+                            aria-label="忘掉这条"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => forgetAll()}
+                      className="mt-3 text-xs text-slate-400 underline-offset-2 hover:underline"
+                    >
+                      全都忘掉
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-400">聊着聊着就记住了，比如你说过"不吃辣"。</p>
+                )}
+              </section>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {authMode && (
