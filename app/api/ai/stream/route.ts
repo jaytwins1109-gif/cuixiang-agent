@@ -41,6 +41,7 @@ import { findLocalSnack } from '@/lib/llm/orchestrator';
 import { composeRecommendReply, sanitizeTransition } from '@/lib/llm/reply-composer';
 import { recallMemory, renderMemoryForPrompt } from '@/lib/memory/store';
 import { syncProductCache } from '@/lib/data/product-cache';
+import { logMessage } from '@/lib/chat/logger';
 import { GUEST_COOKIE, GUEST_MAX_AGE, cookieString } from '@/lib/auth/jwt';
 import { resolveIdentity } from '@/lib/auth/identity';
 import { checkRateLimit } from '@/lib/auth/rate-limit';
@@ -116,6 +117,15 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
     );
   }
 
+  // 用户原话落库：入口写一次（fire-and-forget，见 lib/chat/logger.ts）
+  logMessage({
+    userId,
+    isGuest: identity.isGuest,
+    role: 'user',
+    content: body.message,
+    traceId,
+  });
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
@@ -144,6 +154,15 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
             awaiting: !!payload.awaiting_prefs,
           },
         );
+        // AI 最终回复落库：只记 final 定稿文本，中间 delta 一概不落
+        logMessage({
+          userId,
+          isGuest: identity.isGuest,
+          role: 'assistant',
+          content: typeof payload.reply === 'string' ? payload.reply : '',
+          cards: payload.recommendations,
+          traceId,
+        });
         send('final', { ...payload, trace_id: traceId });
         finish();
       };

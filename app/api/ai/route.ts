@@ -26,6 +26,7 @@ import { findLocalSnack } from '@/lib/llm/orchestrator';
 import { composeRecommendReply, sanitizeTransition } from '@/lib/llm/reply-composer';
 import { recallMemory, renderMemoryForPrompt } from '@/lib/memory/store';
 import { syncProductCache } from '@/lib/data/product-cache';
+import { logMessage } from '@/lib/chat/logger';
 import { GUEST_COOKIE, GUEST_MAX_AGE, cookieString } from '@/lib/auth/jwt';
 import { resolveIdentity } from '@/lib/auth/identity';
 import { checkRateLimit } from '@/lib/auth/rate-limit';
@@ -112,6 +113,15 @@ export async function POST(req: NextRequest) {
       identity: identity.source,
     });
 
+    // 用户原话落库（fire-and-forget，见 lib/chat/logger.ts 的两条红线）
+    logMessage({
+      userId,
+      isGuest: identity.isGuest,
+      role: 'user',
+      content: body.message,
+      traceId,
+    });
+
     // 整轮包进 trace 上下文：lib/llm 深处的报错（provider 挂了、超时重试、降级）
     // 不用把 traceId 当参数一层层传下去，直接问上下文要就行
     const payload = await runWithTrace(traceId, () => handleTurn({ traceId, body, userId }));
@@ -122,6 +132,16 @@ export async function POST(req: NextRequest) {
       route: typeof payload.route === 'string' ? payload.route : '-',
       awaiting: !!payload.awaiting_prefs,
     });
+    // AI 最终回复落库（唯一出口：所有分支的 payload 都从这里 return，不会漏）
+    logMessage({
+      userId,
+      isGuest: identity.isGuest,
+      role: 'assistant',
+      content: typeof payload.reply === 'string' ? payload.reply : '',
+      cards: payload.recommendations,
+      traceId,
+    });
+
     // trace_id 回给调用方：界面上看到的那一句，能直接对上日志里那几行
     const res = NextResponse.json({ ...payload, trace_id: traceId });
     // 游客第一次来（或换了 id）时补发签名票据：/api/auth/upgrade 要靠它证明"这个 id 是我"
