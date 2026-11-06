@@ -4,6 +4,7 @@
  * 原则：只断言确定性行为（本地规则兜底的部分），模型随机性不做强断言。
  */
 import path from 'node:path';
+import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
@@ -11,6 +12,13 @@ import { PrismaClient } from '@prisma/client';
 const BASE = process.env.SMOKE_URL || 'http://localhost:3000/api/ai';
 /** 项目根：拉起子进程跑 .ts 守卫脚本时要用它当 cwd（守卫脚本按 cwd 找 .env 与 data/） */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/**
+ * 测试产物统一落 `tmp/smoke/`（.gitignore 已挡整个 tmp/）。
+ * 历史：以前用 shell 重定向把 smoke 输出写进根目录的 smoke-*.txt / *.flag，
+ * 积了几十个垃圾文件——现在脚本自己把结果落盘到规定位置，根目录不再被污染。
+ */
+const OUT_DIR = path.join(ROOT, 'tmp', 'smoke');
+fs.mkdirSync(OUT_DIR, { recursive: true });
 const SPICY = [
   '辣味海苔脆',
   '海苔香脆混合包',
@@ -163,7 +171,7 @@ const names = (r) =>
 
 const results = [];
 function expect(name, ok, detail = '') {
-  results.push(ok);
+  results.push({ name, ok: !!ok, detail });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`);
 }
 
@@ -1581,12 +1589,29 @@ function runGuard(file, args = []) {
 const pruned = await pruneUsers(testUsers);
 
 // ── 汇总 ─────────────────────────────────────────
-const failed = results.filter((x) => !x).length;
+const failedList = results.filter((x) => !x.ok);
+const failed = failedList.length;
 console.log(`\n结果：${results.length - failed}/${results.length} 通过`);
 console.log(
   pruned.missing
     ? `清理测试用户 ${pruned.removed} 个（${pruned.missing} 个没写过记忆，无需清理）`
     : `清理测试用户 ${pruned.removed} 个`,
 );
+
+// 产物落盘：tmp/smoke/last-run.txt（覆盖写，永远保留最近一次的完整结果）
+const runStamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+const report = [
+  `smoke @ ${runStamp}`,
+  `结果：${results.length - failed}/${results.length} 通过`,
+  `清理测试用户 ${pruned.removed} 个${pruned.missing ? `（${pruned.missing} 个没写过记忆）` : ''}`,
+  '',
+  ...(failedList.length
+    ? ['== FAIL 明细 ==', ...failedList.map((x) => `FAIL  ${x.name} — ${x.detail}`), '']
+    : []),
+  ...results.map((x) => `${x.ok ? 'PASS' : 'FAIL'}  ${x.name}${x.detail ? ` — ${x.detail}` : ''}`),
+];
+fs.writeFileSync(path.join(OUT_DIR, 'last-run.txt'), report.join('\n') + '\n');
+console.log(`产物：tmp/smoke/last-run.txt`);
+
 await prisma.$disconnect();
 process.exit(failed ? 1 : 0);

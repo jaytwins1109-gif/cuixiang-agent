@@ -32,6 +32,9 @@ smoke-*.txt
 smoke-*.flag
 *.flag
 
+# 测试产物统一目录（smoke 结果落 tmp/smoke/last-run.txt）
+/tmp/
+
 # 浏览器自动化快照
 .playwright-cli/
 
