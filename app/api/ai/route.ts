@@ -25,6 +25,7 @@ import {
 import { findLocalSnack } from '@/lib/llm/orchestrator';
 import { composeRecommendReply, sanitizeTransition } from '@/lib/llm/reply-composer';
 import { recallMemory, renderMemoryForPrompt } from '@/lib/memory/store';
+import { syncProductCache } from '@/lib/data/product-cache';
 import { GUEST_COOKIE, GUEST_MAX_AGE, cookieString } from '@/lib/auth/jwt';
 import { resolveIdentity } from '@/lib/auth/identity';
 import { checkRateLimit } from '@/lib/auth/rate-limit';
@@ -73,6 +74,10 @@ interface AiRequestBody {
 export async function POST(req: NextRequest) {
   // TraceID 在入口就生成：这一轮所有打点（含 handler 内部的 [Local]）都靠它串起来
   const traceId = newTraceId();
+  // V3.0 商品缓存惰性同步：单例幂等、fire-and-forget，首请求起后台读库
+  // 原位替换 snacks 的内存数组（内容与内置兜底等价），不阻塞本请求。
+  // 不用 instrumentation.ts——它会被 edge 编译，拖进 lib/db 的 node:fs 直接炸
+  void syncProductCache();
   try {
     const body = (await req.json()) as AiRequestBody;
     if (!body?.message || typeof body.message !== 'string' || !body.message.trim()) {

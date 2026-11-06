@@ -40,6 +40,7 @@ import { INTRODUCE_PATTERN, LEAD_IN_REPLY_PATTERN } from '@/lib/rules/patterns';
 import { findLocalSnack } from '@/lib/llm/orchestrator';
 import { composeRecommendReply, sanitizeTransition } from '@/lib/llm/reply-composer';
 import { recallMemory, renderMemoryForPrompt } from '@/lib/memory/store';
+import { syncProductCache } from '@/lib/data/product-cache';
 import { GUEST_COOKIE, GUEST_MAX_AGE, cookieString } from '@/lib/auth/jwt';
 import { resolveIdentity } from '@/lib/auth/identity';
 import { checkRateLimit } from '@/lib/auth/rate-limit';
@@ -84,6 +85,8 @@ interface StreamBody {
 export async function POST(req: NextRequest) {
   // TraceID 在入口就生成：流式这一轮的 delta / cards / final 都靠它串起来
   const traceId = newTraceId();
+  // 商品缓存惰性同步（见普通路由同位置的注释）
+  void syncProductCache();
   // 整条流包进 trace 上下文：lib/llm 深处的报错（provider 挂了、超时重试）
   // 不用把 traceId 当参数一层层传下去，直接问上下文要
   return runWithTrace(traceId, () => buildStreamResponse(req, traceId));

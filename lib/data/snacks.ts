@@ -1,5 +1,17 @@
 // lib/data/snacks.ts
 // 商品知识库：对接真实商品清单（50 SKU）
+//
+// V3.0「库为源、内存为算」：Product 表是唯一数据源（Admin 后台改库），
+// 本文件的 PRODUCTS / PRODUCT_BY_NAME / PRODUCT_BY_SKU 是**内存视图**——
+// 引用永远不变（业务代码 import 的就是那个数组/Map 对象），内容在启动时
+// 从库同步（syncProductCache）。RAW 派生的静态数据只作启动兜底：
+// 未 seed 的空库 / 读库失败时沿用，并打警告。
+// 对外接口（数组形状、Map、allergensOf）与 V2 完全一致，检索链路零改动。
+//
+// ⚠️ 本文件必须保持**纯数据**（无 DB / 无 node 内置模块 import）：它会被
+// webpack 打进客户端 bundle（前端经 promos 等间接引用）。从库读商品、
+// 触发同步的逻辑全部在 lib/data/product-cache.ts（server-only），
+// 那边通过本文件导出的 installProducts 原位灌数据。
 
 export type Spicy = 0 | 1 | 2 | 3 // 0=不辣 1=微辣 2=中辣 3=重辣
 export type StockStatus = 'in_stock' | 'out_of_stock'
@@ -407,8 +419,8 @@ const RAW: Raw[] = [
   }
 ]
 
-/** 商品表（包含派生逻辑） */
-export const PRODUCTS: Product[] = RAW.map((r, i) => {
+/** 商品表（包含派生逻辑）。静态构建结果只作启动兜底，见文件头说明 */
+const BUILT_IN: Product[] = RAW.map((r, i) => {
   const taste_tags = normalizeTasteTags(r.taste_tags_str)
   const scenes = r.scene_tags_str.split('、').map(s => s.trim())
   const emotions: string[] = [] // 新数据无情绪标签，留空
@@ -436,8 +448,32 @@ export const PRODUCTS: Product[] = RAW.map((r, i) => {
   }
 })
 
-export const PRODUCT_BY_NAME = new Map(PRODUCTS.map(p => [p.name, p]))
-export const PRODUCT_BY_SKU = new Map(PRODUCTS.map(p => [p.sku_id, p]))
+export const PRODUCT_BY_NAME = new Map<string, Product>(BUILT_IN.map(p => [p.name, p]))
+export const PRODUCT_BY_SKU = new Map<string, Product>(BUILT_IN.map(p => [p.sku_id, p]))
+
+/**
+ * 对外出口：业务代码 import 的就是**这个数组**（V2 同名导出）。
+ * 内容启动后被库数据原位替换（installProducts），引用永远不变。
+ */
+export const PRODUCTS: Product[] = BUILT_IN
+
+// ── V3.0：库为源、内存为算 ─────────────────────────────────────────
+// PRODUCTS 与两个索引 Map 的**引用**永远不变（原位替换内容），检索链路
+// （local-workflow / orchestrator / system-prompt 节选）与守卫零感知。
+// 读库 + 调度的逻辑在 product-cache.ts（server-only）；这里只暴露纯内存操作。
+
+/**
+ * 用列表原位替换三个缓存对象的内容（引用不变）。
+ * 供 product-cache.ts（server-only）灌数据；业务代码不要调它。
+ */
+export function installProducts(list: Product[]): void {
+  PRODUCTS.length = 0;
+  PRODUCTS.push(...list);
+  PRODUCT_BY_NAME.clear();
+  for (const p of list) PRODUCT_BY_NAME.set(p.name, p);
+  PRODUCT_BY_SKU.clear();
+  for (const p of list) PRODUCT_BY_SKU.set(p.sku_id, p);
+}
 
 /** 文案里的"不吃辣""花生过敏" → 过敏原 / 忌口标签 */
 const ALLERGEN_WORDS: Record<string, string[]> = {

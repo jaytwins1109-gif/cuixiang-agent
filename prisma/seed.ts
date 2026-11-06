@@ -8,96 +8,37 @@
 // 跑法：npm run db:seed
 import { PrismaClient } from '@prisma/client';
 import { PRODUCTS, type Product } from '../lib/data/snacks';
+import { rowToProduct, type ProductRow } from '../lib/data/product-cache';
 
 const prisma = new PrismaClient();
-
-/** 库行 → Product 接口形状（数组字段 JSON.parse；tags 按原派生逻辑重算） */
-function rowToProduct(row: {
-  skuId: string;
-  name: string;
-  category: string;
-  price: number;
-  reason: string;
-  emoji: string;
-  tasteTagsJson: string;
-  scenesJson: string;
-  emotionsJson: string;
-  sellingPointsJson: string;
-  allergensJson: string;
-  spicy: number;
-  giftOk: boolean;
-  childOk: boolean;
-  stock: string;
-  quality: number;
-  margin: number;
-}): Product {
-  const taste_tags = JSON.parse(row.tasteTagsJson) as string[];
-  const scenes = JSON.parse(row.scenesJson) as string[];
-  const emotions = JSON.parse(row.emotionsJson) as string[];
-  return {
-    sku_id: row.skuId,
-    name: row.name,
-    category: row.category,
-    price: row.price,
-    reason: row.reason,
-    emoji: row.emoji,
-    taste_tags,
-    scenes,
-    emotions,
-    spicy: row.spicy as Product['spicy'],
-    selling_points: JSON.parse(row.sellingPointsJson) as string[],
-    allergens: JSON.parse(row.allergensJson) as string[],
-    gift_ok: row.giftOk,
-    child_ok: row.childOk,
-    stock: row.stock as Product['stock'],
-    quality: row.quality,
-    margin: row.margin,
-    tags: Array.from(new Set([...taste_tags, ...scenes])),
-  };
-}
 
 async function main(): Promise<void> {
   // ── 导入（幂等 upsert）───────────────────────────────────────────
   for (const p of PRODUCTS) {
+    const data = {
+      name: p.name,
+      category: p.category,
+      price: p.price,
+      reason: p.reason,
+      emoji: p.emoji,
+      tasteTagsJson: JSON.stringify(p.taste_tags),
+      scenesJson: JSON.stringify(p.scenes),
+      emotionsJson: JSON.stringify(p.emotions),
+      sellingPointsJson: JSON.stringify(p.selling_points),
+      allergensJson: JSON.stringify(p.allergens),
+      spicy: p.spicy,
+      giftOk: p.gift_ok,
+      childOk: p.child_ok,
+      stock: p.stock,
+      quality: p.quality,
+      margin: p.margin,
+    };
     await prisma.product.upsert({
       where: { skuId: p.sku_id },
-      create: {
-        skuId: p.sku_id,
-        name: p.name,
-        category: p.category,
-        price: p.price,
-        reason: p.reason,
-        emoji: p.emoji,
-        tasteTagsJson: JSON.stringify(p.taste_tags),
-        scenesJson: JSON.stringify(p.scenes),
-        emotionsJson: JSON.stringify(p.emotions),
-        sellingPointsJson: JSON.stringify(p.selling_points),
-        allergensJson: JSON.stringify(p.allergens),
-        spicy: p.spicy,
-        giftOk: p.gift_ok,
-        childOk: p.child_ok,
-        stock: p.stock,
-        quality: p.quality,
-        margin: p.margin,
-      },
+      create: { skuId: p.sku_id, ...data },
       update: {
         // Admin 后台上线前，库以 seed 为准：重复执行直接刷新成代码里的版本
-        name: p.name,
-        category: p.category,
-        price: p.price,
-        reason: p.reason,
-        emoji: p.emoji,
-        tasteTagsJson: JSON.stringify(p.taste_tags),
-        scenesJson: JSON.stringify(p.scenes),
-        emotionsJson: JSON.stringify(p.emotions),
-        sellingPointsJson: JSON.stringify(p.selling_points),
-        allergensJson: JSON.stringify(p.allergens),
-        spicy: p.spicy,
-        giftOk: p.gift_ok,
-        childOk: p.child_ok,
-        stock: p.stock,
-        quality: p.quality,
-        margin: p.margin,
+        ...data,
       },
     });
   }
@@ -117,7 +58,7 @@ async function main(): Promise<void> {
       diffs.push(`${p.sku_id} 缺行`);
       continue;
     }
-    const restored = rowToProduct(row);
+    const restored = rowToProduct(row as ProductRow);
     for (const key of Object.keys(p) as (keyof Product)[]) {
       const a = JSON.stringify(p[key]);
       const b = JSON.stringify(restored[key]);
