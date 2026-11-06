@@ -30,10 +30,14 @@ model User {
   email     String?  @unique // 游客为 null
   password  String? // bcrypt hash，游客为 null
   isGuest   Boolean  @default(true)
+  /// "USER" | "ADMIN"（SQLite 无 enum，类型安全由 lib/auth 的 TS 联合类型守）
+  /// 签发 JWT 时作为快照写进 payload；缺省 USER，旧 token 自动降级
+  role      String   @default("USER")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   memories Memory[]
+  messages Message[]
 }
 
 /// 长期记忆：替代 data/memory.json 里的 MemoryRecord[]
@@ -64,4 +68,61 @@ model Memory {
   // 召回按 (userId, layer, status) 过滤，写盘上限按 (userId, updatedAt) 排序
   @@index([userId, layer, status])
   @@index([userId, updatedAt])
+}
+
+/// 聊天日志（V3.0 Admin「对话审查」数据源）。
+/// 写入原则：日志写挂不阻断对话（logMessage 失败只打点）；
+/// 只存用户看得到的内容（用户原话 / 模型最终回复），trace 原始 JSON 不落这里。
+model Message {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// "user" | "assistant"（SQLite 无 enum）
+  role    String
+  /// 用户原话 / 模型 final 定稿文本（流式不存中间 delta）
+  content String
+  /// 推荐卡数组的 JSON 文本（SQLite 无 Json scalar，读取方 JSON.parse）；user 轮为 null
+  cards   String?
+  /// 关联本轮 TraceID，Admin 审查时一键回溯
+  traceId String?
+
+  createdAt DateTime @default(now())
+
+  // 对话审查按用户翻页；看板按时间聚合
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+/// 商品表（V3.0「库为源、内存为算」）：
+/// Admin 在后台改库 → 写路径刷新内存缓存 → 检索链路照旧读内存数组，零 async 化。
+/// snacks.ts 降级为 seed 数据源；数组字段存 JSON 文本（SQLite 无 scalar list）。
+model Product {
+  id    String @id @default(cuid())
+  skuId String @unique
+  name  String @unique // 业务键：卡片、理由、守卫断言全按 name 引用
+  category String
+  price    Float
+  /// 一句话卖点（卡片展示）——原 reason
+  reason   String
+  emoji    String
+  /// 以下数组字段均为 JSON 文本，如 '["辣味","甜味"]'
+  tasteTagsJson      String @default("[]")
+  scenesJson         String @default("[]")
+  emotionsJson       String @default("[]")
+  sellingPointsJson  String @default("[]")
+  allergensJson      String @default("[]")
+  /// 0=不辣 1=微辣 2=中辣 3=重辣（口味强约束用）
+  spicy    Int     @default(0)
+  giftOk   Boolean @default(false)
+  childOk  Boolean @default(false)
+  /// "in_stock" | "out_of_stock"
+  stock    String  @default("in_stock")
+  quality  Float   @default(85)
+  margin   Int     @default(0)
+  /// 软下架：Admin 停售不删数据；内存缓存只加载 active
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

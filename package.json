@@ -26,6 +26,7 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:backup": "node --import ./scripts/ts-alias-register.mjs scripts/backup-db.ts",
+    "db:seed": "node --import ./scripts/ts-alias-register.mjs prisma/seed.ts",
     "migrate-json": "node scripts/migrate-memory-json.mjs"
   },
   "dependencies": {
