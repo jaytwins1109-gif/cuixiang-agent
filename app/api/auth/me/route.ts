@@ -21,6 +21,7 @@ import {
   clearCookieString,
   cookieString,
   signUserToken,
+  normalizeRole,
   userTokenRemaining,
   verifyUserToken,
 } from '@/lib/auth/jwt';
@@ -42,7 +43,7 @@ const EMPTY_MEMORY: MemoryPayload = {
 };
 
 export async function GET(req: NextRequest) {
-  const tokenUserId = await verifyUserToken(req.cookies.get(TOKEN_COOKIE)?.value);
+  const ticket = await verifyUserToken(req.cookies.get(TOKEN_COOKIE)?.value);
   /**
    * 票据有效但库里没这个人（账号被删）：
    * 落到游客分支，并**把过期票据清掉**——否则这张票还会在 AI 入口被当成登录态，
@@ -50,11 +51,11 @@ export async function GET(req: NextRequest) {
    */
   let staleToken = false;
 
-  if (tokenUserId) {
+  if (ticket) {
     try {
-      const user = await prisma.user.findUnique({ where: { id: tokenUserId } });
+      const user = await prisma.user.findUnique({ where: { id: ticket.userId } });
       if (user) {
-        const memory = await recallMemory(tokenUserId);
+        const memory = await recallMemory(ticket.userId);
         const res = NextResponse.json({
           userId: user.id,
           email: user.email,
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
          */
         const remaining = await userTokenRemaining(req.cookies.get(TOKEN_COOKIE)?.value);
         if (remaining !== null && remaining < TOKEN_MAX_AGE / 2) {
-          const fresh = await signUserToken(user.id).catch(() => null);
+          const fresh = await signUserToken(user.id, normalizeRole(user.role)).catch(() => null);
           if (fresh) {
             res.headers.append('Set-Cookie', cookieString(TOKEN_COOKIE, fresh, TOKEN_MAX_AGE));
           }

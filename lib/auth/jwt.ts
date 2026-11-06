@@ -40,8 +40,14 @@ function verifyKey(): Uint8Array | null {
   return new TextEncoder().encode(secret);
 }
 
-async function sign(kind: 'user' | 'guest', id: string, maxAge: number): Promise<string> {
-  return new SignJWT({ typ: kind })
+async function sign(
+  kind: 'user' | 'guest',
+  id: string,
+  maxAge: number,
+  role?: UserRole,
+): Promise<string> {
+  // role 只在用户票据里出现（游客票据没有角色概念）
+  return new SignJWT({ typ: kind, ...(kind === 'user' ? { role: role ?? 'USER' } : {}) })
     .setProtectedHeader({ alg: ALG })
     .setSubject(id)
     .setIssuedAt()
@@ -50,7 +56,20 @@ async function sign(kind: 'user' | 'guest', id: string, maxAge: number): Promise
     .sign(signingKey());
 }
 
-async function verify(token: string | undefined | null, kind: 'user' | 'guest') {
+/**
+ * 用户角色。库里存的是文本（SQLite 无 enum），这里归一成两个合法值：
+ * 票里的 role 是签发时快照，**非 'ADMIN' 一律按 USER 处理**——
+ * 不信任票里的任意字符串，也不存在第三种角色。
+ */
+export type UserRole = 'USER' | 'ADMIN';
+export function normalizeRole(role?: string | null): UserRole {
+  return role === 'ADMIN' ? 'ADMIN' : 'USER';
+}
+
+async function verify(
+  token: string | undefined | null,
+  kind: 'user' | 'guest',
+): Promise<{ sub: string; role?: string } | null> {
   if (!token) return null;
   const key = verifyKey();
   if (!key) return null;
@@ -58,15 +77,28 @@ async function verify(token: string | undefined | null, kind: 'user' | 'guest') 
     const { payload } = await jwtVerify(token, key, { issuer: ISSUER });
     // typ 也校验：不然游客票据可以当登录票据用（反之亦然）
     if (payload.typ !== kind) return null;
-    return typeof payload.sub === 'string' && payload.sub ? payload.sub : null;
+    if (typeof payload.sub !== 'string' || !payload.sub) return null;
+    return {
+      sub: payload.sub,
+      role: typeof payload.role === 'string' ? payload.role : undefined,
+    };
   } catch {
     // 过期、签名错、格式错，一律当未登录——宽松解析正是伪造票据混进来的入口
     return null;
   }
 }
 
-export const signUserToken = (userId: string) => sign('user', userId, TOKEN_MAX_AGE);
-export const verifyUserToken = (token?: string | null) => verify(token, 'user');
+/** 签发用户登录票据。role 是签发时快照（Admin 降权活到 token 过期，拍板过：接受） */
+export const signUserToken = (userId: string, role: UserRole = 'USER') =>
+  sign('user', userId, TOKEN_MAX_AGE, role);
+/**
+ * 校验用户登录票据 → { userId, role }。
+ * 旧票（V3.0 之前签的）没有 role 字段 → 自动降级 USER，用户无感，不强制重登。
+ */
+export const verifyUserToken = async (token?: string | null) => {
+  const v = await verify(token, 'user');
+  return v ? { userId: v.sub, role: normalizeRole(v.role) } : null;
+};
 
 /**
  * 登录票据的剩余寿命（秒），无效/过期返回 null。
@@ -89,7 +121,8 @@ export async function userTokenRemaining(token?: string | null): Promise<number 
   }
 }
 export const signGuestTicket = (guestId: string) => sign('guest', guestId, GUEST_MAX_AGE);
-export const verifyGuestTicket = (token?: string | null) => verify(token, 'guest');
+export const verifyGuestTicket = async (token?: string | null) =>
+  (await verify(token, 'guest'))?.sub ?? null;
 
 /**
  * Set-Cookie 字符串。

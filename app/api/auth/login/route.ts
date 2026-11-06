@@ -18,6 +18,7 @@ import {
   clearCookieString,
   cookieString,
   signUserToken,
+  normalizeRole,
 } from '@/lib/auth/jwt';
 
 export const runtime = 'nodejs';
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '邮箱或密码不对' }, { status: 401 });
     }
 
-    const token = await signUserToken(user.id);
+    const token = await signUserToken(user.id, normalizeRole(user.role));
     const res = NextResponse.json({ userId: user.id, email: user.email });
     res.headers.append('Set-Cookie', cookieString(TOKEN_COOKIE, token, TOKEN_MAX_AGE));
     // 登录成功清掉游客票据：后续 upgrade 不该再拿老游客 id 来改东西

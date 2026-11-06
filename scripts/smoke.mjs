@@ -779,23 +779,21 @@ expect(
   );
 }
 
-// ── 后台口令：配了就该显示登录表单，没配会退回「后台未启用」──────────
-// 这条用来兜住 ADMIN_PASSWORD_HASH 被误删/漏配的情况：真没配时后台是禁用的，
-// 但那不该是默认状态，跑一次就知道。
+// ── /admin 前端拦截（V3.0 role 守卫）：未登录一律弹回首页 ─────────────
+// V3.0 语义升级：/admin 从「单口令表单」改为 JWT role 守卫，未登录 GET /admin
+// 应该是 307 重定向到 /，而不是渲染登录表单。redirect: 'manual' 才能拿到 307。
 {
   const adminUrl = BASE.replace(/\/api\/ai\/?$/, '/admin');
-  let html = '';
   let status = 0;
   try {
-    const res = await fetch(adminUrl);
+    const res = await fetch(adminUrl, { redirect: 'manual' });
     status = res.status;
-    html = await res.text();
-  } catch (e) {
-    html = e.message;
+  } catch {
+    status = 0;
   }
   expect(
-    '/admin 已启用（口令已配置 → 显示登录表单）',
-    status === 200 && html.includes('输入管理口令进入') && !html.includes('后台未启用'),
+    '未登录 GET /admin → 重定向首页（V3.0 role 守卫）',
+    status === 307 || status === 302,
     `GET ${adminUrl} → ${status}`,
   );
 }

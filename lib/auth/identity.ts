@@ -22,6 +22,7 @@ import {
   signGuestTicket,
   verifyGuestTicket,
   verifyUserToken,
+  type UserRole,
 } from './jwt';
 import { normalizeUserId } from './user-id';
 import { tracePrefix } from '@/lib/chat/trace';
@@ -31,6 +32,8 @@ export type IdentitySource = 'token' | 'guest-header' | 'new-guest';
 export interface Identity {
   userId: string;
   isGuest: boolean;
+  /** 签发时快照（cx_token 票里带来的）；游客恒为 USER */
+  role: UserRole;
   /** 这轮身份从哪来，写进 trace 日志，排查时一眼看出是谁 */
   source: IdentitySource;
   /** 需要下发给浏览器的游客票据（只在游客身份且票据缺失/不匹配时非空） */
@@ -39,9 +42,9 @@ export interface Identity {
 
 export async function resolveIdentity(req: NextRequest): Promise<Identity> {
   // 1) 登录态：票据说你是谁就是谁，请求体里传什么都盖不掉
-  const tokenUserId = await verifyUserToken(req.cookies.get(TOKEN_COOKIE)?.value);
-  if (tokenUserId) {
-    return { userId: tokenUserId, isGuest: false, source: 'token' };
+  const ticket = await verifyUserToken(req.cookies.get(TOKEN_COOKIE)?.value);
+  if (ticket) {
+    return { userId: ticket.userId, isGuest: false, role: ticket.role, source: 'token' };
   }
 
   // 2) 游客：只认请求头，没有就现发一个
@@ -56,7 +59,7 @@ export async function resolveIdentity(req: NextRequest): Promise<Identity> {
   //    或有人在无 cookie 客户端裸奔，那是前端问题，别拿重签发逻辑背锅
   const ticketGuest = await verifyGuestTicket(req.cookies.get(GUEST_COOKIE)?.value);
   if (ticketGuest === userId) {
-    return { userId, isGuest: true, source };
+    return { userId, isGuest: true, role: 'USER', source };
   }
 
   const guestTicket = await signGuestTicket(userId).catch(() => undefined);
@@ -65,5 +68,5 @@ export async function resolveIdentity(req: NextRequest): Promise<Identity> {
       `${tracePrefix()}[Identity] 补发游客票据 uid=${userId} source=${source}（首次/过期/换id）`,
     );
   }
-  return { userId, isGuest: true, source, guestTicket };
+  return { userId, isGuest: true, role: 'USER', source, guestTicket };
 }

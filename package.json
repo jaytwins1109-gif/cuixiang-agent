@@ -20,6 +20,7 @@
     "capture-log": "node scripts/capture-log.mjs",
     "gen-password": "node scripts/gen-password.mjs",
     "prune-memory": "node --import ./scripts/ts-alias-register.mjs scripts/prune-memory.ts",
+    "promote-admin": "node --import ./scripts/ts-alias-register.mjs scripts/promote-admin.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

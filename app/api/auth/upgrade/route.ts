@@ -17,6 +17,7 @@ import {
   clearCookieString,
   cookieString,
   signUserToken,
+  normalizeRole,
   verifyGuestTicket,
 } from '@/lib/auth/jwt';
 import { strictUserId } from '@/lib/auth/user-id';
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
       update: { email, password: hashed, isGuest: false },
     });
 
-    const token = await signUserToken(user.id);
+    const token = await signUserToken(user.id, normalizeRole(user.role));
     const res = NextResponse.json({ userId: user.id, email: user.email });
     res.headers.append('Set-Cookie', cookieString(TOKEN_COOKIE, token, TOKEN_MAX_AGE));
     // 升级完游客票据就作废，避免它继续被用来"再升级一次"

@@ -6,6 +6,7 @@ import {
   safeEqualHex,
   SESSION_MAX_AGE_SECONDS,
 } from '@/lib/admin/session';
+import { TOKEN_COOKIE, verifyUserToken } from '@/lib/auth/jwt';
 
 const COOKIE = 'cx_admin';
 
@@ -42,7 +43,11 @@ async function logout() {
 export default async function AdminPage() {
   const hash = process.env.ADMIN_PASSWORD_HASH;
   const store = await cookies();
-  const authed = verifySessionTicket(store.get(COOKIE)?.value, hash);
+  // 两条路都能进：V1 口令票据（cx_admin，8h）或 V3.0 的 ADMIN 登录票（cx_token，role 快照）。
+  // middleware 已拦掉非 ADMIN，这里再验一次是纵深防御——页面自己不信 middleware。
+  const tokenTicket = await verifyUserToken(store.get(TOKEN_COOKIE)?.value);
+  const authed =
+    verifySessionTicket(store.get(COOKIE)?.value, hash) || tokenTicket?.role === 'ADMIN';
 
   // 未设置口令：给出配置方法，不让任何人进得来
   if (!hash) {
