@@ -14,6 +14,9 @@ import { createHmac, timingSafeEqual } from 'crypto';
 /** 会话有效期，与 cookie 的 maxAge 保持一致（8 小时） */
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 
+/** V1 口令会话 cookie 名（middleware 只看存在性，验签在页面层） */
+export const ADMIN_SESSION_COOKIE = 'cx_admin';
+
 /** 派生密钥时掺进去的固定标签，避免拿口令哈希直接当 HMAC key */
 const KEY_LABEL = 'cx_admin_session_v1';
 

@@ -1,14 +1,14 @@
 import { cookies } from 'next/headers';
 import { createHash } from 'crypto';
 import {
+  ADMIN_SESSION_COOKIE,
   createSessionTicket,
   verifySessionTicket,
   safeEqualHex,
   SESSION_MAX_AGE_SECONDS,
 } from '@/lib/admin/session';
 import { TOKEN_COOKIE, verifyUserToken } from '@/lib/auth/jwt';
-
-const COOKIE = 'cx_admin';
+import { DashboardClient } from '@/components/admin/dashboard-client';
 
 function sha256(text: string) {
   return createHash('sha256').update(text).digest('hex');
@@ -25,19 +25,13 @@ async function login(formData: FormData) {
   // 票据由服务端用 ADMIN_PASSWORD_HASH 派生密钥签名，
   // 光手写一个 cookie 名进来是过不了校验的。
   const store = await cookies();
-  store.set(COOKIE, createSessionTicket(expected), {
+  store.set(ADMIN_SESSION_COOKIE, createSessionTicket(expected), {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     maxAge: SESSION_MAX_AGE_SECONDS, // 8 小时
     path: '/',
   });
-}
-
-async function logout() {
-  'use server';
-  const store = await cookies();
-  store.delete(COOKIE);
 }
 
 export default async function AdminPage() {
@@ -47,7 +41,8 @@ export default async function AdminPage() {
   // middleware 已拦掉非 ADMIN，这里再验一次是纵深防御——页面自己不信 middleware。
   const tokenTicket = await verifyUserToken(store.get(TOKEN_COOKIE)?.value);
   const authed =
-    verifySessionTicket(store.get(COOKIE)?.value, hash) || tokenTicket?.role === 'ADMIN';
+    verifySessionTicket(store.get(ADMIN_SESSION_COOKIE)?.value, hash) ||
+    tokenTicket?.role === 'ADMIN';
 
   // 未设置口令：给出配置方法，不让任何人进得来
   if (!hash) {
@@ -78,63 +73,8 @@ export default async function AdminPage() {
     );
   }
 
-  const rows = [
-    [
-      '大脑',
-      'DeepSeek',
-      !!process.env.DEEPSEEK_API_KEY,
-      process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-    ],
-    ['编排引擎', 'Coze / Dify / local', true, process.env.ORCHESTRATOR || 'coze'],
-    [
-      'Coze',
-      '工作流',
-      !!process.env.COZE_API_KEY,
-      process.env.COZE_WORKFLOW_ID ? '已配 workflow' : '未配 workflow',
-    ],
-    [
-      'Dify',
-      '备用异步',
-      !!process.env.DIFY_API_KEY,
-      process.env.DIFY_BASE_URL || 'http://localhost:3000/v1',
-    ],
-  ] as const;
-
-  return (
-    <Shell>
-      <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-xl font-extrabold text-cx-600">脆香后台</h1>
-        <form action={logout}>
-          <button className="rounded-full border border-cx-200 px-3 py-1.5 text-xs text-cx-500 hover:bg-cx-50">
-            退出
-          </button>
-        </form>
-      </div>
-
-      <div className="space-y-2">
-        {rows.map(([name, desc, ok, detail]) => (
-          <div
-            key={name}
-            className="flex items-center gap-3 rounded-xl border border-cx-100 bg-white px-4 py-3"
-          >
-            <span
-              className={`h-2.5 w-2.5 shrink-0 rounded-full ${ok ? 'bg-emerald-400' : 'bg-cx-200'}`}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-cx-700">{name}</div>
-              <div className="truncate text-xs text-cx-400">{detail}</div>
-            </div>
-            <span className="shrink-0 text-xs text-cx-400">{desc}</span>
-          </div>
-        ))}
-      </div>
-
-      <p className="mt-5 text-[11px] leading-relaxed text-cx-400">
-        这里只显示「配没配」，不显示 Key 本身。要改 Key 去服务器上的{' '}
-        <code className="rounded bg-cx-50 px-1">.env.local</code>。
-      </p>
-    </Shell>
-  );
+  // authed：V3.0 数据看板（V1 的"配没配"状态页职责被看板取代，配置排查走 env）
+  return <DashboardClient />;
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

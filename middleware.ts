@@ -10,10 +10,14 @@
 // 什么"顺手查一下库核对 role"的念头都不许有——那是编译期就会炸掉全站的坑。
 import { NextResponse, type NextRequest } from 'next/server';
 import { TOKEN_COOKIE, verifyUserToken } from '@/lib/auth/jwt';
+import { ADMIN_SESSION_COOKIE } from '@/lib/admin/session';
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const ticket = await verifyUserToken(req.cookies.get(TOKEN_COOKIE)?.value);
   if (ticket?.role === 'ADMIN') return NextResponse.next();
+  // V1 口令票据（cx_admin）：edge 验不了 node:crypto 的 HMAC，这里只看"有没有"，
+  // 真伪与有效期由 layout / page 层 verifySessionTicket 验签——安全边界不在 middleware。
+  if (req.cookies.get(ADMIN_SESSION_COOKIE)?.value) return NextResponse.next();
   return NextResponse.redirect(new URL('/', req.url));
 }
 
