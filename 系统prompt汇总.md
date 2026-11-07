@@ -403,7 +403,10 @@ HTTP 报错（`!res.ok`）不重试——额度、鉴权这类问题不会自己
 | 判 chat 但命中 `INTRODUCE_PATTERN` 且本地库找得到商品 | 升级 introduce，补 `product_name` |
 | 判 chat 但 `allowRecommend` 放行 | 升级 recommend，文案去留交给 `replyForUpgrade`（见 3.7） |
 
-`keepTransitionOnly`：含价格的行全部丢掉，取第一行不带价格且 ≤40 字的句子。
+`keepTransitionOnly`（**2026-11-06 扩口径**）：把模型抄进 reply 的"伪卡片行"清干净，三层——
+① **行内截断**：过渡语和清单挤在同一行时（"行，追剧的来了——按剧吃：⚠️ 海盐焦糖爆米花…"），从清单 emoji 起到行尾整段去掉；
+② **逐行剔除**：带价格（`PRICE_PATTERN`）、过敏原标注（`ALLERGEN_LABEL_PATTERN`，"含海产品/致敏物质/过敏原"类）、emoji 打头接商品串（`LIST_EMOJI_LINE_PATTERN`）三种清单行全部丢掉（`looksLikeFakeListLine`）；
+③ **兜底**：剩下的第一行 ≤40 字才留，太长说明收拾不了，整个交给 `pickTransition` 现挑。
 
 **偏好兜底抽取（`extractPrefsFromText`）**
 
@@ -1026,6 +1029,7 @@ Coze 工作流里「客服回复生成器」节点的本地版。**风险提示�
 
 | 日期 | 改动 | 涉及文件 |
 |---|---|---|
+| 2026-11-06 | **防伪清单行口径扩展（V3.0 冻结后首笔，解冻记录）**：模型会把卡片字段抄进 reply——除已知带价清单（"1. XX｜29.9元"）外，又出现两种**不带价**的伪卡片行：「⚠️ 儿童海苔小片：含海产品；…」（过敏原标注）与「⚠️ 商品A、商品B：…」（emoji 商品串）。堵法：① `patterns.ts` 新增 `ALLERGEN_LABEL_PATTERN`（"含有?/致敏/过敏原 + 产品/制品/成分/物质/原"）与 `LIST_EMOJI_LINE_PATTERN`（emoji 打头接商品串的行）② `lib/llm/index.ts` 的 `keepTransitionOnly` 扩三层：行内从清单 emoji 起整段截断（过渡语和清单挤一行的情况）→ `looksLikeFakeListLine` 逐行剔除（带价/过敏原标注/emoji 商品串）→ 首行 ≤40 字才留，否则整个交给 `pickTransition` ③ `handlers.ts` 的 `stripFakeList` 清单行判定同步接两个新正则（陪聊轮自己编清单也拦得住）④ `system-prompt.ts` 两处强化：「绝对、绝对、绝对禁止在 reply 里输出任何商品列表行」「emoji 商品串和过敏原标注也是卡片字段，出现一律被系统整行切掉——别写，写了也是白写」。验证：`smoke` 164/164（23:42，夜间自动跳 2 条时间用例）。UI 侧：`FilterPanel` 加 `dark` 适配（深色品牌卡内 `bg-white/5` + `white/20` 边框）、`hero-card`/`page.tsx` 布局微调（同一笔，未提交） | `lib/rules/patterns.ts` / `lib/llm/index.ts` / `lib/chat/handlers.ts` / `lib/prompts/system-prompt.ts` / `app/_components/{filter-panel,hero-card}.tsx` / `app/page.tsx` / 本文件 §3.4 |
 | 2026-11-05 | **终审：记忆召回截断漏洞（P0）+ 身份签发打点（P1）**：① `recallMemory` 的 `where` 下推状态过滤（`status: { notIn: ['deleted','superseded'] }`）——原 `take: limit` 先截断后过滤，废弃记忆攒满 20 条就把 active 长期偏好挤出结果集（伪失忆）；一次性 DB 探针证伪/验证（25 条**比有效记忆新**的 superseded + 1 条 active + 1 条 pending，limit 20：修前 core/pending 全空，修后全召回，用完即删）② `resolveIdentity` 票据签发**已有"对得上就不重发"早退**（外审"每请求都签发"不成立），按建议在真签发路径（首次/过期/换id）加 trace 打点——线上这条日志刷屏 = 前端 cookie 没落住，不是签发逻辑的锅。schema.prisma / jwt.ts 核实无需改动 | `lib/memory/store.ts` / `lib/auth/identity.ts` / 本文件 §4.2 |
 | 2026-11-05 | **核心链路外审 5 处（P0×3 + P1×2）**：① `handlePendingConfirmation` 否定开头答复一律本地按"否"办结（二次修正 10-31 的放行决策——放行导致 pending 挂死循环；删 `isRetraction`，`PENDING_NO_PATTERN` 锚定 `^` 保证句中"不是"不误拦）② 删 `requestOnce` 的进程级 `blankStreak` Map——一个用户赶上空白、全体用户跟着降级自由文本；改为只看当前调用 attempt 0/1 ③ `extractPrefsFromText` 场景抽取加否定闸（`sceneHit` 回看前文 4 字内 `不想/不去/别去/没去/再也不/不在` 不抽）④ `page.tsx` final 比 delta 短（嘴瓢被剪）时纯文本轮垫"哎呀刚才嘴瓢了，重说——"+ 挂 `refreshed` 淡入（阈值 -6 防微差触发）⑤ `CATEGORY_WORDS` 补宽（虾条/雪饼/蛋卷/卤味/螺蛳粉/小鱼干/棉花糖/开心果等 20+ 常见口语句；链路 `allowRecommend → mentionsGoods` 本来就通，外审举例的"饼干"原在表中）。守卫 +9（场景否定闸正反 4 + mentionsGoods 2 + PENDING_NO 锚定 3）、smoke +2（否定场景端到端） | `lib/chat/handlers.ts` / `lib/llm/index.ts` / `lib/llm/category-words.ts` / `app/page.tsx` / `scripts/reco-guard.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / 本文件 §3.2 §4.5 §5.3 |
 | 2026-11-05 | **外审 6 处修复（脏话拦截废除 / 删除关键词洗"的" / CONSENT 放宽 / 档位示例对齐 / 2 处核实已达标）**：① `PROFANITY_PATTERN` 整个删除（正则 + `sanitizeModelReply` / `settleChatReply` 两处引用）——用户骂脏话是情绪宣泄，本地拦截等于规训用户；人设第 127 行"模型自己不说脏话"的红线保留 ② `extractMemoryKeyword` 兜底捕获洗掉开头的"的"——「忘掉我**的**薯片」→「的薯片」，`includes` 永远落空（白名单用例盖不住：带白名单词的会被先截走） ③ `CONSENT_PATTERN` 放宽：语气词 `*`、允许短尾巴，"好的，来点""行，随便"算点头；有转折/新内容（"好啊那我不买了"）仍不算 ④ `describeConstraint` 示例"辣味 + 10元内"→"30元内"（V2.0 换库后的上下层脱节） ⑤ **核实已达标**：`RECOMMEND_PITCH_PATTERN` 只在完整 reply 上跑（`brain-stream.ts` A/B/C 分层，delta 阶段仅结构级抽取+零宽清洗）；chat 意图在 `routeIntent` 本地分流走 `runChatChain`（`buildChatPrompt` + 纯文本无 json_object），主 prompt 的 JSON schema 只进推荐/介绍链路，第七节已补分流说明。守卫 +8（删除关键词带"的"用例、CONSENT 正反 7 例）、smoke +1（带尾巴点头接上推荐）。⚠ 顺带发现文档 §3.4 等处仍是旧档位"10元内/10-30元"（V2.0 换库时的文档债，真源 `system-prompt.ts` 已是三档） | `lib/rules/patterns.ts` / `lib/llm/index.ts` / `lib/chat/handlers.ts` / `lib/prompts/system-prompt.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / 本文件 §4.4 §5.1 §7 |
