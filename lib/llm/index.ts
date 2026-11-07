@@ -11,6 +11,8 @@ import {
   RECOMMEND_PITCH_PATTERN,
   SPICY_WANT_PATTERN,
   PRICE_PATTERN,
+  ALLERGEN_LABEL_PATTERN,
+  LIST_EMOJI_LINE_PATTERN,
   KNOWN_SHORT,
   LEAD_IN_REPLY_PATTERN,
   HONORIFIC_PATTERN,
@@ -408,18 +410,45 @@ function pickGibberishReply(): string {
 }
 
 /**
+ * 单行是不是"模型抄进来的伪卡片行"。
+ * 价格口径（"1. XX｜29.9元"）之外还要抓两种不带价的：
+ *   - 过敏原标注行（"⚠️ 儿童海苔小片：含海产品；…"）——卡片字段，人话里不该有
+ *   - emoji 打头接商品串的行（"⚠️ 商品A、商品B：含…"）
+ */
+function looksLikeFakeListLine(line: string): boolean {
+  if (PRICE_PATTERN.test(line)) return true;
+  if (ALLERGEN_LABEL_PATTERN.test(line)) return true;
+  if (LIST_EMOJI_LINE_PATTERN.test(line)) return true;
+  return false;
+}
+
+/**
  * 模型把推荐清单写进 reply 时，只留开头那句不带价格的过渡语。
  * 清单会被卡片顶掉，留着就是重复；但"行，不说了。来点解气的——"这种值得留。
+ *
+ * 口径（2026-11-06 扩）：
+ *   1. 行**内**污染——"行，追剧的来了——按剧吃：⚠️ 海盐焦糖爆米花、…"
+ *      过渡语和清单挤在同一行，从清单 emoji 起整段截掉
+ *   2. 整行清单（带价 / 过敏原标注 / emoji 商品串）→ 逐行剔除
+ *   3. 剩下的第一行 ≤40 字才留，太长说明没法收拾，整个交给 pickTransition 兜底
  */
 function keepTransitionOnly(reply?: string): string | undefined {
   const text = cleanReply(reply);
   if (!text) return undefined;
-  if (!PRICE_PATTERN.test(text)) return text;
 
-  const first = text
+  // 行内截断：从清单 emoji 起到行尾整段去掉（过渡语和清单挤一行的情况）
+  const stripped = text
+    .split('\n')
+    .map((l) => l.replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}]\u{FE0F}?[^\n]*$/u, '').trim())
+    .join('\n');
+  const polluted = stripped !== text;
+
+  if (!polluted && !PRICE_PATTERN.test(stripped)) return stripped;
+
+  const first = stripped
     .split('\n')
     .map((s) => s.trim())
-    .find((s) => s && !PRICE_PATTERN.test(s));
+    .find((s) => s && !looksLikeFakeListLine(s));
 
   return first && first.length <= 40 ? first : undefined;
 }

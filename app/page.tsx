@@ -723,9 +723,21 @@ export default function Page() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 sm:p-6">
       <div className="flex h-[90vh] w-full max-w-[1200px] gap-6">
-        {/* ── 左侧品牌卡（深色沉浸式，桌面常驻）────────── */}
+        {/* ── 左侧品牌卡（深色沉浸式，桌面常驻）：下半部分内嵌筛选面板 ── */}
         <aside className="hidden w-[300px] shrink-0 lg:block">
-          <HeroCard onScene={(t) => void send(t)} busy={loading} />
+          <HeroCard>
+            <div className="scroll-slim max-h-full overflow-y-auto pr-1">
+              <FilterPanel
+                filters={filters}
+                onToggle={toggle}
+                onClear={clearFilters}
+                active={active}
+                profile={profile}
+                onForget={forgetProfile}
+                dark
+              />
+            </div>
+          </HeroCard>
         </aside>
 
         {/* ── 口味/偏好抽屉（桌面点 ☰ 也从这里开）─── */}
@@ -759,10 +771,10 @@ export default function Page() {
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           {/* Header：h-16，底边极细分割线 */}
           <header className="flex h-16 shrink-0 items-center gap-2 border-b border-slate-100 px-4 sm:gap-3 sm:px-5">
-            {/* ☰：口味/偏好抽屉入口（桌面移动都在这） */}
+            {/* ☰：口味/偏好抽屉入口（筛选面板桌面已入深色卡，这里只留给移动端） */}
             <button
               onClick={() => setDrawer(true)}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 lg:hidden"
               aria-label="口味与偏好筛选"
             >
               <span className="text-lg">☰</span>

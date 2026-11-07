@@ -25,6 +25,8 @@ import {
   PICK_REFERENCE_PATTERN,
   SCENE_COMPLAINT_PATTERN,
   SPICY_DENIAL_PATTERN,
+  ALLERGEN_LABEL_PATTERN,
+  LIST_EMOJI_LINE_PATTERN,
 } from '@/lib/rules/patterns';
 import type { ChatMessage, Filters } from '@/lib/llm';
 import {
@@ -273,7 +275,13 @@ export function stripFakeList(reply: string, traceId?: string): string {
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
-  const idx = lines.findIndex((l) => /^\d+[.、]\s*.+[｜|]\s*\d/.test(l));
+  // 清单行口径：编号带价（"1. XX｜29.9元"）之外，还有模型爱抄的两种不带价的伪卡片行——
+  // 过敏原标注（"⚠️ 儿童海苔小片：含海产品"）和 emoji 商品串（见 patterns.ts 的注释）
+  const isListLine = (l: string): boolean =>
+    /^\d+[.、]\s*.+[｜|]\s*\d/.test(l) ||
+    ALLERGEN_LABEL_PATTERN.test(l) ||
+    LIST_EMOJI_LINE_PATTERN.test(l);
+  const idx = lines.findIndex(isListLine);
   if (idx < 0) return reply || '';
   traceLocal(
     traceId,

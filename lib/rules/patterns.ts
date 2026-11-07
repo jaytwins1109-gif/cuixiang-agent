@@ -265,6 +265,23 @@ export const ZERO_WIDTH_PATTERN = /[\u200b-\u200f\u202a-\u202e\ufeff]/g;
 export const PRICE_PATTERN = /[\d.]+\s*(?:块|元)|¥\s*[\d.]+/;
 
 /**
+ * 模型把卡片明细抄进 reply 的"伪卡片行"：不带价格、抓不到 `PRICE_PATTERN`，
+ * 所以要单独认。两种特征（命中其一即视为清单行）：
+ *
+ *   1. **过敏原标注**——"含海产品""含乳制品""致敏物质""过敏原"，这是卡片字段，
+ *      人话里不该出现（模型爱在商品名后面补一句"含XX"假装严谨）
+ *   2. **emoji 打头的商品串**——"⚠️ 商品A、商品B：含…"，推荐明细被塞成一行
+ *
+ * 用于 keepTransitionOnly / stripFakeList 的口径扩展：清单永远由本地按数据合成，
+ * reply 里只许留过渡语。
+ */
+export const ALLERGEN_LABEL_PATTERN =
+  /(?:含有?|致敏(?:物质|信息)?|过敏(?:原|信息)?)[^，。；！？\n]{0,12}(?:产品|制品|成分|物质|原)/;
+
+export const LIST_EMOJI_LINE_PATTERN =
+  /^[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}]\u{FE0F}?[\s]*[^\n]{2,}[：:、]/u;
+
+/**
  * 常见的短打招呼 / 语气词（`hi` `ok` `666` `hhh` `绝了` …）。
  * 命中即放行交给模型接，别当乱敲拦掉。
  */

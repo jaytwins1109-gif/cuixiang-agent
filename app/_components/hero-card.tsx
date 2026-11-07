@@ -1,20 +1,13 @@
 'use client';
 
-import { SCENES } from './constants';
+import type { ReactNode } from 'react';
 
 /**
  * 左侧品牌卡片（深色沉浸式，对齐参考稿）：
- * eyebrow + 3D 头像占位 + 大标题 + 快捷咨询竖排按钮 + 底部版权。
- * 纯展示组件：场景点击直接复用既有的 send()，不带任何状态。
+ * eyebrow + 3D 头像占位 + 大标题 + children（筛选面板插槽）+ 底部版权。
+ * children 里的交互（选口味/价格/忘偏好）直接复用 page 的既有回调，本组件不带状态。
  */
-export function HeroCard({
-  onScene,
-  busy,
-}: {
-  onScene: (text: string) => void;
-  /** 对话进行中时场景按钮禁用（与输入框发送按钮同一语义） */
-  busy: boolean;
-}) {
+export function HeroCard({ children }: { children?: ReactNode }) {
   return (
     <div className="flex h-full w-full flex-col rounded-3xl bg-[#1E293B] p-6 text-white">
       {/* eyebrow 行：品牌定位 + 在线状态 */}
@@ -50,27 +43,8 @@ export function HeroCard({
         <p className="mt-2 text-xs leading-relaxed text-white/50">馋了直接说，想找人说话也行。</p>
       </div>
 
-      {/* 快捷咨询竖排：bg-white/10 半透明底，右侧箭头 */}
-      <div className="mt-6 space-y-2">
-        <div className="text-[11px] font-semibold tracking-wider text-white/40">常见咨询</div>
-        {SCENES.map((s) => (
-          <button
-            key={s.title}
-            onClick={() => onScene(s.text)}
-            disabled={busy}
-            className="group flex w-full items-center gap-3 rounded-xl bg-white/10 px-4 py-3 text-left transition hover:bg-white/20 disabled:opacity-40"
-          >
-            <span className="text-lg transition group-hover:scale-110">{s.icon}</span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold">{s.title}</span>
-              <span className="block truncate text-[11px] text-white/50">{s.sub}</span>
-            </span>
-            <span className="text-white/30 transition group-hover:translate-x-0.5 group-hover:text-white/60">
-              →
-            </span>
-          </button>
-        ))}
-      </div>
+      {/* 筛选面板插槽：口味/价格/当前偏好（page 传入深色适配的 FilterPanel） */}
+      {children && <div className="mt-6">{children}</div>}
 
       {/* 底部版权：mt-auto 贴着卡片底 */}
       <div className="mt-auto pt-6">
