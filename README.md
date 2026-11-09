@@ -19,11 +19,30 @@
 
 ## 快速开始
 
+按照以下步骤，1 分钟内在本地跑起“脆脆”：
+
+**1. 配置环境变量**
+将根目录的 `.env.example` 复制并重命名为 `.env.local`，填入以下内容：
+- `AUTH_SECRET`：**必填**。随便填一串 32 位的随机英文字母（用于登录鉴权）。
+- `DATABASE_URL`：**必填**。保持默认的 `file:./data/cuixiang.db` 即可。
+- `DEEPSEEK_API_KEY`：**选填**。不填系统会自动降级为纯本地规则引擎，**依然可以体验完整的 UI 和商品推荐**。
+
+**2. 一键安装、建库并启动**
+在终端中复制并运行以下完整命令：
+
 ```bash
+# 1. 安装依赖
 npm install
-cp .env.example .env.local   # 然后填 Key
-npm run dev                  # http://localhost:3000
-```
+
+# 2. 复制环境变量文件（记得去填好 Key 和 Secret）
+cp .env.example .env.local
+
+# 3. 初始化数据库（建表并写入 50 款种子商品数据）
+npx prisma db push
+npm run db:seed
+
+# 4. 启动项目
+npm run dev
 
 浏览器打开 <http://localhost:3000>。
 
