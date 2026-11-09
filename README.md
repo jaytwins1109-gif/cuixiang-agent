@@ -1,4 +1,9 @@
 # 脆香 · 零食推荐助手
+![Next.js](https://img.shields.io/badge/Next.js-15-black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
+![Tests](https://img.shields.io/badge/Tests-299%20Passed-brightgreen)
+![License](https://img.shields.io/badge/License-MIT-green)
+
 
 一个带**长期记忆**的零食推荐助手。不是客服机器人，是那种会记得你"不吃辣"、
 会在你吐槽加班时先陪你两句再顺手推零食的搭子。
@@ -7,7 +12,8 @@
 - 内核：确定性选品链路（需求抽取 → 检索 → 硬过滤 → 排序 → 优惠 → 合规），**不靠模型选品**
 - 大脑：DeepSeek（主）/ 智谱 GLM（备），只负责"判断意图 + 抽偏好 + 说人话"
 - 编排：默认本地工作流，Coze / Dify 只是可选外挂
-![UI预览](./assets/ui-preview.png)
+  
+<img src="./assets/ui-preview.png" alt="UI预览" width="800" />
 
 ---
 
