@@ -3,7 +3,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
 ![Tests](https://img.shields.io/badge/Tests-299%20Passed-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
-
+![Tests](https://img.shields.io/badge/Tests-299%20Passed-brightgreen)
 
 一个带**长期记忆**的零食推荐助手。不是客服机器人，是那种会记得你"不吃辣"、
 会在你吐槽加班时先陪你两句再顺手推零食的搭子。
