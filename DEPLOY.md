@@ -98,6 +98,12 @@ Render 的 Native Environment（不是 Docker Runtime）自带 **Pre-Deploy Comm
 | Disk | 任意大小，挂载路径 `/var/data`（SQLite 就写在这里；**免费实例没有 Disk，必须付费档**） |
 | Health Check Path | `/api/health` |
 
+> **本项目专属坑**：`prisma/migrations` 里缺 `User.nickname` 字段（那列是后来用 `prisma db push`
+> 加的），所以上表 Pre-Deploy 要改成 `npx prisma db push`。沿用 `migrate deploy` 会建出缺列的库，
+> 上线后账号功能全崩。仓库根目录已放 `render.yaml`（Blueprint），直接按它建服务即可；
+> 仓库里 `AUTH_SECRET` / `DEEPSEEK_API_KEY` / `ADMIN_PASSWORD_HASH` 三个密钥要手动填进控制台
+> （从本地 `.env.local` 搬，别写进仓库）。
+
 验证：部署完成后 `curl https://<你的域名>/api/health`，应返回 `{"status":"ok","db":"connected"}`。
 
 ### 走法 B：Railway / Fly（Dockerfile 路线）

@@ -1,0 +1,41 @@
+# Render Blueprint（基础设施即代码）。
+# 在 Render 控制台「New → Blueprint」选这个 GitHub 仓库即自动按本文件建服务。
+# 不装 Docker：runtime 用 Render 原生 Node（Nixpacks），不是 Dockerfile。
+#
+# ⚠️ 本项目迁移历史不全（prisma/migrations 里没有 User.nickname 字段，
+#    那个字段最初是 `prisma db push` 加的），所以 preDeployCommand 必须用
+#    `npx prisma db push` 而不是文档 DEPLOY.md 里写的 `prisma migrate deploy`——
+#    否则上线后 User 表缺 nickname 列，账号功能全崩。
+#
+# ⚠️ SQLite 必须挂持久盘，且只能单实例。免费档没有 Disk，必须用至少 Starter($7/月)。
+#    下面 disk 挂到 /var/data，DATABASE_URL 用绝对路径指向它。
+
+services:
+  - type: web
+    name: cuixiang
+    runtime: node
+    plan: starter
+    branch: main
+    buildCommand: npm ci && npx prisma generate && npm run build
+    preDeployCommand: npx prisma db push
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: TZ
+        value: Asia/Shanghai
+      - key: DATABASE_URL
+        value: file:/var/data/cuixiang.db
+      # 下面三个是密钥，不写进仓库：在 Render 控制台服务页的 Environment 里手动填，
+      # 值从本地 .env.local 搬（AUTH_SECRET / DEEPSEEK_API_KEY / ADMIN_PASSWORD_HASH）。
+      - key: AUTH_SECRET
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1

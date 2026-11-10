@@ -12,11 +12,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 最后更新 | 2026-11-10（**代码已推上 GitHub**；本地生产服务在 `:3000` 运行；云部署待用户在 Render/Railway 接仓库，或本机装 Docker） |
-| 当前在做 | 无。两摊功能 + 本地生产部署 + 推远程均已完成 |
+| 最后更新 | 2026-11-10（**用户拍板走 Render/Railway，不装 Docker**；已落 `render.yaml`（Render Blueprint）+ 修正 DEPLOY.md 迁移坑；代码已在 GitHub） |
+| 当前在做 | 部署：R/R 配置已备齐，待用户在平台接仓库并填密钥（本机无他们的账号凭证，按不了按钮） |
 | 最近回归 | `verify` **212/212**、lint 0、`format:check` 全绿、`npm run guard` 三个守卫 `GUARD_FAILED=0`、`smoke` **228/228（0 FAIL）**、`npm run build` 成功（19 页 + 中间件 37kB）、生产 `/api/health` = `{"status":"ok","db":"connected"}`、游客→注册升级闭环 200（验 `AUTH_SECRET` 签发） |
-| 阻塞 | 仅剩「本机未装 Docker」——`docker compose up` 路线跑不了（DEPLOY.md 主路线）；但代码已上 GitHub，**Render / Railway 接仓库即可（无需 Docker）** |
-| 下一步 | **本地已是可用的生产服务**：`http://localhost:3000`（prod 模式，`NODE_ENV=production`）。要上云走 B 路线：去 Render / Railway 接 `cuixiang-agent` GitHub 仓库（Build `npm ci && npx prisma generate && npm run build`、Pre-Deploy `npx prisma migrate deploy`、Start `npm start`），环境变量从 `.env.local` 搬过去：`AUTH_SECRET` / `DEEPSEEK_API_KEY` / `ADMIN_PASSWORD_HASH`，平台设 `TZ=Asia/Shanghai`、`DATABASE_URL=file:/var/data/cuixiang.db` + 挂持久盘 |
+| 阻塞 | 无代码阻塞。**R/R 上云需用户在平台侧操作**：① 在 Render/Railway 连 GitHub 仓库 `cuixiang-agent` ② 控制台手动填 `AUTH_SECRET` / `DEEPSEEK_API_KEY` / `ADMIN_PASSWORD_HASH`（从本地 `.env.local` 搬，不入仓库）③ 挂持久盘（SQLite 必须，且只能单实例；免费档无盘，须付费档） |
+| 下一步 | **本地生产服务仍在** `http://localhost:3000`（prod 模式）。上云走 R/R：**迁移坑已查清——`prisma/migrations` 缺 `nickname`，Pre-Deploy 必须用 `npx prisma db push`（不是 `migrate deploy`）**。最简路径：Render 控制台「New → Blueprint」选本仓库，`render.yaml` 已写好（runtime 原生 Node、Build `npm ci && npx prisma generate && npm run build`、Pre-Deploy `npx prisma db push`、Start `npm start`、Health `/api/health`、挂 `/var/data` 盘、设 `TZ=Asia/Shanghai` + `NODE_VERSION=20`）；只剩三个密钥需手动填。Railway 等价：Nixpacks 构建、Release Command `npx prisma db push`、Start `npm start`、挂 Volume 到 `/var/data`、同款环境变量 |
 | 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8）；`npm run build` 前必须先停 dev server（两者共用 `.next`） |
 
 ---
