@@ -30,6 +30,9 @@ model User {
   email     String?  @unique // 游客为 null
   password  String? // bcrypt hash，游客为 null
   isGuest   Boolean  @default(true)
+  /// 用户昵称（2026-11-10）：null = 还没设过，接口按 defaultNickname() 兜一个默认值返回并落库。
+  /// 会拼进 system prompt，写入前必须过 cleanNickname() 洗掉换行 / 引号 / 控制字符。
+  nickname  String?
   /// "USER" | "ADMIN"（SQLite 无 enum，类型安全由 lib/auth 的 TS 联合类型守）
   /// 签发 JWT 时作为快照写进 payload；缺省 USER，旧 token 自动降级
   role      String   @default("USER")

@@ -44,6 +44,7 @@ import { syncProductCache } from '@/lib/data/product-cache';
 import { logMessage } from '@/lib/chat/logger';
 import { GUEST_COOKIE, GUEST_MAX_AGE, cookieString } from '@/lib/auth/jwt';
 import { resolveIdentity } from '@/lib/auth/identity';
+import { resolveNickname } from '@/lib/auth/nickname';
 import { checkRateLimit } from '@/lib/auth/rate-limit';
 import {
   newTraceId,
@@ -55,11 +56,16 @@ import {
   runWithTrace,
 } from '@/lib/chat/trace';
 import {
+  handleWhoAmI,
   handleMemoryIntent,
   handlePendingConfirm,
   handleInsistAvoid,
+  handleMeaninglessInput,
+  handleOutOfScopeOrder,
   cardBlocked,
   guardReply,
+  priceDataGuard,
+  asksPrice,
   stripFakeList,
   runRecommendation,
   runLocalBrain,
@@ -69,6 +75,7 @@ import {
   snapshot,
   pickTransition,
   withPendingQuestion,
+  PRICE_DATA_MISSING_REPLY,
 } from '@/lib/chat/handlers';
 
 export const runtime = 'nodejs';
@@ -175,6 +182,8 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
           identity: identity.source,
         });
         const memory = await recallMemory(userId);
+        // 与普通入口同口径：昵称一次读出来，本地「我是谁」和两条模型链路共用
+        const nickname = await resolveNickname(userId);
         const messages: ChatMessage[] = [
           ...(body.history || []).slice(-10),
           { role: 'user' as const, content: body.message },
@@ -182,12 +191,20 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         const ctx = {
           inRecommendContext: body.inRecommendContext,
           memoryText: renderMemoryForPrompt(memory),
+          nickname: nickname ?? undefined,
         };
 
         // ── 阶段 1：输入侧正则（同步，零延迟）────────────────────
         // 判的是「用户说了什么」。输入是完整的，不存在分块问题，
         // 所以这些判断压根不参与流式——能本地办结的就直接办结，比流式还快。
         send('stage', { stage: 'memory' });
+
+        // 「我是谁」必须在记忆问答之前：「你记得我是谁吗」两边都命中
+        const whoRes = handleWhoAmI(body.message, nickname, memory, traceId);
+        if (whoRes) {
+          sendFinal(whoRes);
+          return;
+        }
 
         const memRes = await handleMemoryIntent(userId, body.message, memory, traceId);
         if (memRes) {
@@ -209,6 +226,20 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
           return;
         }
 
+        // 连续无意义输入（"1""2""3"）：第 3 轮起本地收尾，不再让模型接茬
+        const quietRes = await handleMeaninglessInput(userId, messages, traceId);
+        if (quietRes) {
+          sendFinal(quietRes);
+          return;
+        }
+
+        // 凑单 / 满减 / 大额预算：本地没有购物车，进模型只会换来一套编出来的活动规则
+        const scopeRes = await handleOutOfScopeOrder(userId, body.message, memory, traceId);
+        if (scopeRes) {
+          sendFinal(scopeRes);
+          return;
+        }
+
         // ── 阶段 2：流式调大脑（只吐 reply，不吐商品清单）──────────
         send('stage', { stage: 'thinking' });
 
@@ -224,12 +255,21 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         if (definiteGoods) {
           traceLocal(traceId, '明确要货（definiteGoods）', '模型逐字不上屏，过渡语和卡片一起到');
         }
+        /**
+         * 问价：这一轮手里没有卡片数据，模型吐出的每个数字都是编的。
+         * 逐字上屏会让用户先看到一个假价、再被 final 整段替换（价格闪烁最不能忍），
+         * 所以同 definiteGoods 一样先攒着，等出口兜底再说。
+         */
+        const priceAsk = asksPrice(body.message);
+        if (priceAsk) {
+          traceLocal(traceId, '问价（本轮无卡片数据）', '模型逐字不上屏，出口按无价兜底');
+        }
 
         let raw = '';
         try {
           for await (const ev of streamBrain(messages, body.filters, ctx, chatOnly)) {
             if (ev.type === 'delta' && ev.text) {
-              if (!definiteGoods) send('delta', { text: ev.text });
+              if (!definiteGoods && !priceAsk) send('delta', { text: ev.text });
             } else if (ev.type === 'raw') {
               raw = ev.content;
             }
@@ -354,12 +394,16 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
             brainRes.preferences,
             ctx,
           );
-          const reply = guardReply(
-            apologizeForMissedScene(
-              body.message,
-              withPendingQuestion(stripFakeList(fixed, traceId) || UNCLEAR_REPLY, mem.question),
+          const reply = priceDataGuard(
+            body.message,
+            guardReply(
+              apologizeForMissedScene(
+                body.message,
+                withPendingQuestion(stripFakeList(fixed, traceId) || UNCLEAR_REPLY, mem.question),
+              ),
+              memory,
+              traceId,
             ),
-            memory,
             traceId,
           );
           sendFinal({
@@ -387,9 +431,16 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
           const blocked = cardBlocked(card, freshMemory, traceId);
           sendFinal({
             route: 'direct',
-            reply: blocked
-              ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card?.name}就不给你推了。换个别的？`
-              : guardReply(brainRes.reply?.trim() || 'emmm 这个我还不太了解', freshMemory, traceId),
+            reply: withPendingQuestion(
+              blocked
+                ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card?.name}就不给你推了。换个别的？`
+                : guardReply(
+                    brainRes.reply?.trim() || 'emmm 这个我还不太了解',
+                    freshMemory,
+                    traceId,
+                  ),
+              mem.question,
+            ),
             profile: cleanProfile(body.message, prefs),
             ...(card && !blocked ? { recommendations: [card] } : {}),
             memory: snapshot(freshMemory),
@@ -412,10 +463,15 @@ async function buildStreamResponse(req: NextRequest, traceId: string) {
         });
 
         if (!recommendations.length) {
+          // 问价但一件都没选出来：没有真实价格就别让用户等一个编出来的数字
+          const emptyReply = priceAsk
+            ? PRICE_DATA_MISSING_REPLY
+            : workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？';
           sendFinal({
             route: 'direct',
-            reply: workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？',
-            awaiting_prefs: !!workflow?.follow_up,
+            // 与普通入口同口径：0 卡片也要把口味冲突的确认提问带出去，别把 pending 晾着
+            reply: withPendingQuestion(emptyReply, mem.question),
+            awaiting_prefs: !priceAsk && !!workflow?.follow_up,
             profile: cleanProfile(body.message, prefs),
             memory: snapshot(freshMemory),
           });

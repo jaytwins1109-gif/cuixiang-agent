@@ -189,6 +189,11 @@ export interface BrainContext {
    * 而不是只靠前端传来的当轮 userProfile。没有就不填。
    */
   memoryText?: string;
+  /**
+   * 服务端账号表里的用户昵称（`resolveNickname()` 读出来的）。
+   * 两条链路的 system 顶部都会注入【当前用户信息】，让模型能自然称呼用户。
+   */
+  nickname?: string;
 }
 
 /** 这道闸只做「放行 / 拦下」，不负责把 chat 升成 recommend */
@@ -496,7 +501,7 @@ export async function callChatOnly(
 
   const lastMsg = messages[messages.length - 1];
   const full: ChatMessage[] = [
-    { role: 'system', content: buildChatPrompt(ctx?.memoryText) + (hint || '') },
+    { role: 'system', content: buildChatPrompt(ctx?.memoryText, ctx?.nickname) + (hint || '') },
     ...messages.slice(0, -1),
     { role: 'user', content: lastMsg.content },
   ];
@@ -1039,7 +1044,7 @@ export async function callBrain(
 
   // 【改动2】不再拼接 JSON_INSTRUCTION 到 user，格式已在 system 里
   const fullMessages: ChatMessage[] = [
-    { role: 'system', content: buildSystemPrompt(filters, ctx?.memoryText) },
+    { role: 'system', content: buildSystemPrompt(filters, ctx?.memoryText, ctx?.nickname) },
     ...messages.slice(0, -1),
     { role: 'user', content: lastMsg.content },
   ];

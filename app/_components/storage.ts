@@ -90,3 +90,52 @@ export function mergeProfileExclusive(
   }
   return next;
 }
+
+/**
+ * 拿服务端快照校正本地 profile：**服务端没有的，界面就不许挂**。
+ *
+ * 2026-11-09 的现场：用户问「我喜欢什么口味」，后端一条记忆都没有，侧栏却还挂着「口味·辣味」——
+ * 那是上一轮留在 localStorage 里的缓存，服务端从来没记过它
+ * （"今天想吃辣"这类一次性需求按设计就不写长期记忆）。界面挂着、选品却不按它来，
+ * 用户看到的是系统自己造出来的幻觉，跟"失忆"是同一枚硬币的两面。
+ *
+ * 匹配用宽口径：记忆文本形如「不吃辣：不吃辣」「辣=喜欢辣」，
+ * 所以除了原文包含，还把 `辣味` 折成 `辣` 再比一次（profile 里口味值带"味"后缀，
+ * 记忆里存的是轴字）。
+ */
+export function reconcileProfileWithMemory(
+  prev: Record<string, string>,
+  memory:
+    | { core_profile?: string[]; summary_memory?: string[]; active_fragments?: string[] }
+    | null
+    | undefined,
+): Record<string, string> {
+  const texts = [
+    ...(memory?.core_profile || []),
+    ...(memory?.summary_memory || []),
+    ...(memory?.active_fragments || []),
+  ];
+  // 服务端一条都没有 → 本地也一条都不留
+  if (!texts.length) return {};
+
+  /**
+   * 忌口标记：记忆里「不吃辣」和「喜欢辣」都含一个「辣」字，
+   * 把 `辣味` 折成 `辣` 去比时必须先排掉带这些词的句子，
+   * 否则"记着不吃辣"会被当成"记着喜欢辣"，口味标签照样挂回去。
+   */
+  const AVOID_MARK = /不吃|不想吃|不要|忌|戒|不碰|不嗜|不喜/;
+  const hit = (v: string) => {
+    const axis = v.replace(/味$/, '');
+    return texts.some((t) => {
+      if (t.includes(v)) return true;
+      if (axis !== v && t.includes(axis) && !AVOID_MARK.test(t)) return true;
+      return false;
+    });
+  };
+
+  const next: Record<string, string> = {};
+  for (const [k, v] of Object.entries(prev)) {
+    if (hit(v)) next[k] = v;
+  }
+  return next;
+}

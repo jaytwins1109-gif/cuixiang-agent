@@ -25,7 +25,12 @@ import {
   apologizeForMissedScene,
 } from '@/lib/chat/handlers';
 import { extractPrefsFromText } from '@/lib/llm';
-import { CONSENT_PATTERN, PENDING_NO_PATTERN } from '@/lib/rules/patterns';
+import {
+  CONSENT_PATTERN,
+  PENDING_NO_PATTERN,
+  PENDING_TEMP_PATTERN,
+  PENDING_PERMANENT_PATTERN,
+} from '@/lib/rules/patterns';
 import { avoidTagsFromText, budgetFromText } from '@/lib/llm/local-workflow';
 import { decideMemoryAction, type RecalledMemory } from '@/lib/memory/store';
 import type { GuardResult } from './guard-types';
@@ -115,6 +120,35 @@ export function runProfileGuard(): GuardResult[] {
     const p = extractPrefsFromText(text);
     report(p.avoid === undefined, `反向对照：「${text}」不能抽成忌口`, p.avoid || '（空，正确）');
   }
+
+  /**
+   * 忌口 + 要甜挤在同一句（2026-11-09 用户报的侧栏失步）：
+   * 「甜甜的，不能是辣的」以前一条忌口规则都不命中，裸「辣的」反而被
+   * `SPICY_WANT_PATTERN` 抽成 `flavor='辣味'`——用户明说不要辣，侧栏却挂上辣味。
+   */
+  const pivotPrefs = extractPrefsFromText('甜甜的，不能是辣的');
+  report(
+    pivotPrefs.avoid === '不吃辣' && pivotPrefs.flavor === '甜味',
+    '「甜甜的，不能是辣的」→ 忌口（不吃辣）+ 口味（甜味）同句抽出',
+    JSON.stringify(pivotPrefs),
+  );
+  /** 反向对照：单纯说要辣，不能被抽成忌口 */
+  const wantSpicyPrefs = extractPrefsFromText('想吃辣的');
+  report(
+    wantSpicyPrefs.avoid === undefined && wantSpicyPrefs.flavor === '辣味',
+    '反向对照：「想吃辣的」→ 只记口味、不算忌口',
+    JSON.stringify(wantSpicyPrefs),
+  );
+  /** 侧栏要拿到的是这两条一起（回给前端的 profile 口径） */
+  const trustedPivot = pickTrustedProfile('甜甜的，不能是辣的', {
+    flavor: '甜味',
+    avoid: '不吃辣',
+  });
+  report(
+    trustedPivot.flavor === '甜味' && trustedPivot.avoid === '不吃辣',
+    '改口同句 → 甜味 + 忌口一起回给前端（侧栏换标签靠它）',
+    keys(trustedPivot),
+  );
 
   /** 抽出来的忌口必须能翻译成硬过滤标签，否则等于记了但拦不住 */
   for (const avoid of ['花生过敏', '坚果过敏', '海鲜过敏', '乳制品过敏']) {
@@ -300,17 +334,20 @@ export function runProfileGuard(): GuardResult[] {
       `花生=${avoidAxisOf('花生过敏')} 海鲜=${avoidAxisOf('海鲜过敏')}`,
     );
 
-    // 改口味轮的事实与决策：忌口是唯一事实，直接写（用户明说的作废，不用确认）
+    // 2026-11-09 新口径：改口味轮**同时**产出忌口 + 新口味两条事实，
+    // 一轮只写 facts[0] 会把用户说的"甜"丢掉（记忆断层的根因之一）
     const pivotFacts = factsFromMessage(
       '不想吃辣了，想吃甜的',
       { avoid: '不吃辣', flavor: '甜味' },
       memTaste,
     );
     report(
-      pivotFacts.length === 1 &&
+      pivotFacts.length === 2 &&
         pivotFacts[0].category === '过敏忌口' &&
-        pivotFacts[0].polarity === '拒绝',
-      '「不想吃辣了，想吃甜的」抽出忌口事实（不误抽口味）',
+        pivotFacts[0].polarity === '拒绝' &&
+        pivotFacts[1].category === '口味' &&
+        pivotFacts[1].key === '甜',
+      '「不想吃辣了，想吃甜的」→ 忌口 + 甜味两条事实都产出',
       JSON.stringify(pivotFacts),
     );
     report(
@@ -368,6 +405,81 @@ export function runProfileGuard(): GuardResult[] {
       !PENDING_NO_PATTERN.test('其实我觉得还好吧，不用改'),
       '「其实我觉得还好吧」→ "不是"不在句首，不命中（交给大脑正常接话）',
       String(PENDING_NO_PATTERN.test('其实我觉得还好吧，不用改')),
+    );
+  }
+
+  // ── 2026-11-09 口味一律长期化 + 冲突先确认「临时 / 真改」──────────────
+  {
+    const memSweet: RecalledMemory = {
+      ...emptyMemory,
+      core_profile: ['甜：甜=喜欢甜味'],
+    };
+    const memNoSpicy: RecalledMemory = {
+      ...emptyMemory,
+      core_profile: ['不吃辣：不吃辣'],
+    };
+
+    /** 正向：没有长期副词也照样产出口味事实（旧口径只认"我平时都喜欢吃…"） */
+    for (const [text, axis] of [
+      ['来点甜的', '甜'],
+      ['我想吃辣的', '辣'],
+      ['甜甜的', '甜'],
+      ['我喜欢吃咸的', '咸'],
+    ] as const) {
+      const f = factsFromMessage(text, {});
+      const taste = f.find((x) => x.category === '口味');
+      report(
+        taste?.key === axis,
+        `「${text}」→ 产出口味事实（${axis}），不再要求长期副词`,
+        JSON.stringify(f),
+      );
+    }
+
+    /** 反向对照：没说口味的问句 / 空请求不能凭空造事实 */
+    for (const text of ['有什么好吃的', '我喜欢什么口味', '来点吃的']) {
+      const f = factsFromMessage(text, {});
+      report(f.length === 0, `反向对照：「${text}」不是偏好陈述 → 不产出事实`, JSON.stringify(f));
+    }
+
+    const tasteChange = decideMemoryAction(factsFromMessage('来点辣的', {}), memSweet);
+    report(
+      tasteChange.decision === 'confirmation_required' &&
+        /临时/.test(tasteChange.confirmationquestion),
+      '记着甜味却说辣 → 挂确认，提问明确区分「临时 / 真改」',
+      `${tasteChange.decision} / ${tasteChange.confirmationquestion}`,
+    );
+
+    const breakAvoid = decideMemoryAction(factsFromMessage('我想吃辣的', {}), memNoSpicy);
+    report(
+      breakAvoid.decision === 'confirmation_required' &&
+        /临时/.test(breakAvoid.confirmationquestion),
+      '记着不吃辣却要辣 → 挂确认，确认前不撤忌口',
+      `${breakAvoid.decision} / ${breakAvoid.confirmationquestion}`,
+    );
+
+    const sameTaste = decideMemoryAction(factsFromMessage('来点甜的', {}), memSweet);
+    report(
+      sameTaste.decision === 'consistent_update',
+      '反向对照：同一个口味轴只是措辞不同 → 原地更新，不重复追问',
+      sameTaste.decision,
+    );
+
+    report(
+      PENDING_TEMP_PATTERN.test('临时的，就这一次') &&
+        !PENDING_PERMANENT_PATTERN.test('临时的，就这一次'),
+      '「临时的，就这一次」→ 按不更新办结',
+      String(PENDING_TEMP_PATTERN.test('临时的，就这一次')),
+    );
+    report(
+      PENDING_PERMANENT_PATTERN.test('以后都吃甜的吧') &&
+        !PENDING_TEMP_PATTERN.test('以后都吃甜的吧'),
+      '「以后都吃甜的吧」→ 按真改口味办结',
+      String(PENDING_PERMANENT_PATTERN.test('以后都吃甜的吧')),
+    );
+    report(
+      !PENDING_TEMP_PATTERN.test('我想吃辣的') && !PENDING_PERMANENT_PATTERN.test('我想吃辣的'),
+      '反向对照：正常点单不是确认答复',
+      String(PENDING_TEMP_PATTERN.test('我想吃辣的')),
     );
   }
 

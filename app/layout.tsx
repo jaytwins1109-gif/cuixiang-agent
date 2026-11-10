@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { CartProvider } from './_components/cart-context';
 
 export const metadata: Metadata = {
   title: '脆香零食 · 你的零食推荐好友',
@@ -27,7 +28,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className="bg-slate-50 text-slate-800 antialiased">{children}</body>
+      <body className="bg-slate-50 text-slate-800 antialiased">
+        {/* 挂在根 layout：`/` 与 `/shop` 之间客户端导航不卸载，购物车跨页保留 */}
+        <CartProvider>{children}</CartProvider>
+      </body>
     </html>
   );
 }

@@ -50,7 +50,9 @@ export function FilterPanel({
 
       <div
         className={
-          dark ? 'rounded-2xl border border-white/20 bg-white/5 p-3' : 'rounded-2xl border border-slate-200 bg-white p-3 shadow-sm'
+          dark
+            ? 'rounded-2xl border border-white/20 bg-white/5 p-3'
+            : 'rounded-2xl border border-slate-200 bg-white p-3 shadow-sm'
         }
       >
         <div className={`mb-2 text-xs font-bold ${dark ? 'text-white/50' : 'text-slate-500'}`}>
@@ -90,7 +92,11 @@ export function FilterPanel({
                   {PROFILE_LABEL[k] || k}·{v}
                   <button
                     onClick={() => onForget(k)}
-                    className={dark ? 'text-white/40 hover:text-white' : 'text-slate-300 hover:text-slate-600'}
+                    className={
+                      dark
+                        ? 'text-white/40 hover:text-white'
+                        : 'text-slate-300 hover:text-slate-600'
+                    }
                     aria-label="忘掉这条"
                   >
                     ✕
@@ -163,7 +169,9 @@ function FilterGroup({
 }) {
   return (
     <div>
-      <h3 className={`mb-2 text-xs font-bold tracking-wider ${dark ? 'text-white/40' : 'text-slate-400'}`}>
+      <h3
+        className={`mb-2 text-xs font-bold tracking-wider ${dark ? 'text-white/40' : 'text-slate-400'}`}
+      >
         {title}
       </h3>
       <div className="flex flex-wrap gap-2">

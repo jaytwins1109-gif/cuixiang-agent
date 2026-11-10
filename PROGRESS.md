@@ -12,16 +12,61 @@
 
 | 项 | 状态 |
 |---|---|
-| 最后更新 | 2026-11-07（核对 V3.0 冻结后改动：C端布局对齐/还原 + 防伪清单行口径扩展，文档已补同步，改动尚未提交） |
-| 当前在做 | 冻结期维护：① 昨晚提交的「C端UI对齐参考稿」曾把文案改跑、已在 `94183eb` 还原为零食客服；② 未提交的 7 文件 = 防伪清单行（`ALLERGEN_LABEL_PATTERN` / `LIST_EMOJI_LINE_PATTERN` + `keepTransitionOnly` 三层清洗）+ `FilterPanel` dark 适配 |
-| 最近回归 | 防伪清单行改动后 `smoke` **164/164**（11-06 23:42，夜间自动跳 2 条时间用例，等价全绿）；冻结终态 verify 133/133 + smoke 166/166 |
+| 最后更新 | 2026-11-10（**昵称 + `/shop` 两摊收尾完成并一次性提交**；异常重启后靠本文件 + `AGENTS.md` + `docs/TEST_LOG.md` 读档恢复，用户拍板「C，纳入」） |
+| 当前在做 | 无。上一项两摊收尾已结转到 §2 |
+| 最近回归 | `verify` **212/212**、lint 0、`format:check` 全绿、`npm run guard` 三个守卫 `GUARD_FAILED=0`、`smoke` **228/228（0 FAIL）** |
 | 阻塞 | 无 |
-| 下一步 | 未提交的 7 个文件待用户确认后提交；之后按 `DEPLOY.md` 上云 |
+| 下一步 | 按 `DEPLOY.md` 部署上云（记得配 `AUTH_SECRET` 并用 `openssl rand -base64 32` 生成）；`prisma generate` / `db push` 要在部署机跑一次（`User.nickname` 新字段） |
 | 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8）；`npm run build` 前必须先停 dev server（两者共用 `.next`） |
 
 ---
 
 ## 1. 正在做（Doing）
+
+**暂无**。两摊收尾已完成并结转 §2；重启恢复过程与验收数字见 §2 首两行、`TEST_LOG.md` 与 `docs/TEST_LOG.md` 的 11-10 专项。
+
+<details>
+<summary>2026-11-10 读档时的原始缺口清单（留档，已完成）</summary>
+
+### 2026-11-10 异常重启读档收尾（用户拍板「C，纳入」，两摊一起提交）
+
+电脑异常重启后按三件套读档，发现 `PROGRESS.md` 落后于磁盘：除昵称外还有一整摊未登记的 `/shop`「0 Token 货架」。
+用户确认两摊一起补齐文档与回归并一次性提交。**代码主体重启前已写完**（`verify` 192/192 全绿、DB 已 push），本轮只补缺口：
+
+| # | 缺口 | 处理 |
+|---|---|---|
+| 1 | `scripts/shop-guard.ts` 被 `app/shop/page.tsx` / `shop-shelf.tsx` / `cart-context.tsx` 三处注释引用，文件根本不存在 | 新建守卫（扫描 `app/shop/**` 的 import 链，禁 LLM / `fetch('/api/ai')` / 直接 import `snacks.PRODUCTS`），挂进 `npm run guard` + vitest |
+| 2 | 首页 `app/page.tsx` 没有 `/shop` 入口；货架「问问脆脆」跳 `/?ask=…` 但没人消费 | 顶栏加入口；`useEffect` 读 `?ask=` 自动发一句话，读完立刻 `replaceState` 清参数（防刷新重复发） |
+| 3 | `scripts/smoke.mjs` 无 `/shop` 用例 | 新增第 39 节：页面 200 / 商品来自 Prisma / 0 Token 红线 / 首页入口可达 |
+| 4 | 《系统prompt汇总》变更记录停在 11-09，缺昵称与 `/shop` 的 11-10 行 | 补 §1 全景图两行、§2.4 昵称注入、§5.0「我是谁」拦截、§6 顶栏入口、§17 `/shop` 0 Token 链路 + 变更记录两行 |
+| 5 | 两份 TEST_LOG 最新停在 11-09 | 追加 11-10 专项记录，已回填真实数字 |
+
+**顺序纪律**：改完代码 → 快检（verify / lint / format / guard）→ 起 dev server 跑 `smoke`（跑期间不动任何文件）→ 回填文档 → 一次性提交。
+**执行结果**：`verify` 212/212、lint 0、format 全绿、guard 3/3、`smoke` 228/228（0 FAIL）；探针用户已清理。
+
+### 2026-11-10 用户昵称（昵称入库 + 侧栏编辑 + AI 称呼 + 「我是谁」拦截）
+
+需求：① `User.nickname String?` + `prisma db push`；② 昵称空时后端生成默认值
+`"用户" + 邮箱前缀前4位`（邮箱空取 userId 后 4 位）并在 `/api/auth/me`、注册、登录返回；
+`/api/auth/me` 加 `PATCH` 改昵称；③「我的」侧栏在邮箱上方醒目展示昵称 + 🖊️ 编辑（极简输入框、保存后实时刷新）；
+④ `buildSystemPrompt` / `buildChatPrompt` 顶部注入【当前用户信息】强指令（走 `BrainContext.nickname`）；
+⑤ `WHO_AM_I_PATTERN` 命中即本地办结，有昵称回「你是 X 呀！不管换啥设备我都认得你。」，无昵称引导去「我的」设置；
+⑥ `verify` + `smoke` 全绿，补注册→默认昵称→我是谁→改昵称→再次对话的自动化用例。
+**注意**：这是提示词变更（`system-prompt.ts` / `patterns.ts`），按规则必须同步《系统prompt汇总》章节 + 变更记录 + smoke 用例；
+改了 Prisma schema 后 dev server 要重启才能拿到新 client。
+
+</details>
+
+### 2026-11-09 口味长期化（已完成，见 §2 首行）
+
+用户否决「一次性口味」设计：**只要没有冲突，用户说出口的口味一律记进长期记忆**；
+**遇到冲突先确认是「临时尝鲜」还是「真的改口味」，再决定是否更新口味**。
+已落：`factsFromMessage` 去长期副词门槛 → `decideMemoryAction` 加同轴忌口 / 异轴旧口味两类冲突 →
+`syncMemory` 一轮写多条事实（忌口写后重新召回）→ `resolvePending` 确认后作废旧轴口味 →
+待确认答复新增「临时 / 以后都」话术 → 四类出口统一带出确认提问 →
+提示词 §六 / §九 / 陪聊「怎么聊」+ 《系统prompt汇总》§4.2/§4.3/§4.4/§4.5/§5.2b 同步。
+**保留的安全红线**：忌口/过敏本轮原话明确即立即写（死命令，不等确认），并立即作废同轴旧口味；
+口味→忌口绝不静默。
 
 ### V2.0 数据库化 + 鉴权（Prisma + SQLite）
 
@@ -78,6 +123,13 @@
 
 | 日期 | 任务 | 结果 | 关键落点 |
 |---|---|---|---|
+| 2026-11-10 | **`/shop`「0 Token 极速货架」+ 收尾补齐**（电脑异常重启后读档发现：看板只登记了昵称，磁盘上还有一整摊未登记的 `/shop`；用户拍板「C，纳入」两摊一起提交） | ✅ `verify` **212/212**（新增 `tests/shop-guard.test.ts` 20 条）、lint 0、`format:check` 全绿、`npm run guard` 三个守卫 `GUARD_FAILED=0`、`smoke` **228/228（0 FAIL）**；`GET /shop` 200，库内 48 款在架商品名全部命中，HTML 不含 `/api/ai`；探针用户已清理 | `scripts/shop-guard.ts`（新，从 `app/shop/page.tsx` BFS 出 7 文件 import 链，19 条断言 + 3 条反向对照）/ `tests/shop-guard.test.ts`（新）/ `package.json`（guard 挂第三项）/ `app/page.tsx`（顶栏 `href="/shop"` 入口 + 消费 `?ask=`）/ `scripts/smoke.mjs` §39 / 《系统prompt汇总》§1 §6 §17 + 变更记录 / 两份 TEST_LOG |
+| 2026-11-10 | **用户昵称全链路**（`User.nickname` + 默认昵称 + PATCH + 「我的」侧栏编辑 + 两份提示词注入【当前用户信息】+「我是谁」本地拦截） | ✅ `verify` **192/192**（含 `tests/nickname.test.ts` 13 条）→ 收尾后全仓 **212/212**；`smoke` §38 全绿（默认昵称 / 我是谁 / PATCH 立刻生效 / 持久化 / 注册登录 / SSE 同口径 / 脏值清洗 / 自我介绍反向对照）；`prisma db push` 已执行，库里已有 nickname 列 | `prisma/schema.prisma` / `lib/auth/nickname.ts`（新）/ `lib/rules/patterns.ts` / `lib/prompts/system-prompt.ts` / `lib/chat/handlers.ts` / 两个 AI 入口 / 三个 auth 路由 / `app/_components/use-auth.ts` / `app/page.tsx` / `tests/nickname.test.ts`（新）/ 《系统prompt汇总》§2.4 §5.0 + 变更记录 |
+| 2026-11-09 | **口味一律长期化 + 冲突先确认「临时 / 真改」**（用户否决"一次性口味"）：「只要没有冲突，就都记下；遇到冲突，先确认是临时口味变化还是真的变了口味，再决定是否更新口味」。① `factsFromMessage` 废长期副词门槛，本轮原话抽得出 `flavor` 就产出口味事实（key 归一到口味轴），「来点甜的」与「我平时都喜欢吃辣的」落库形状一致 ② `syncMemory` 逐条处理事实，忌口先写并作废同轴旧口味后重新召回再判后续事实，用户同句说的忌口 + 甜味不再只记一半 ③ `decideMemoryAction` 加两类冲突（同轴忌口 / 异轴旧口味）→ 挂 pending 问「临时尝鲜还是真改口味」；同口味轴措辞不同 → 原地更新不追问 ④ `resolvePending(true)` 额外作废旧口味轴记录；新增 `PENDING_TEMP/PERMANENT_PATTERN`，答「临时的，就这一次」按不更新办结、「以后都吃甜的」按真改办结，且先于长句放行判断 ⑤ 普通/SSE 的 0 卡片与介绍分支、`runLocalBrain` 统一 `withPendingQuestion`，改口味追问场景那轮不再吞确认提问 ⑥ 提示词 §六/§九/陪聊同步，模型不许替系统宣布改口味、不许说"一次性需求" ⑦ **保留**：忌口/过敏立即写、立即作废同轴旧口味，不等确认 | ✅ `verify` **179/179**、lint 0、format 全绿；`smoke` 第一轮 **189/190**（唯一红灯是旧口径断言「一次性需求不记成长期口味」，已改写为新口径三条并复跑）；14d 四条例句实测：「来点甜的」→ `["甜：甜=喜欢甜味"]`、「换成辣的吧」→ 追问「临时 / 真改」且旧甜味保留、「临时的，就这一次」→ `resolved` 且口味不动、「以后都吃辣的」→ 甜味作废、辣味生效 | `lib/memory/store.ts` / `lib/chat/handlers.ts` / `lib/rules/patterns.ts` / `lib/prompts/system-prompt.ts` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / `系统prompt汇总.md` |
+| 2026-11-09 | **记忆闭环打通（本地查询拦截 / 忌口抽反 / 侧栏失步 / 空记忆注入）**：用户报三条——① 问「我不是跟你说过吗」「我喜欢什么口味」意图没被本地拦，模型答"我哪知道啊，咱俩才聊几句" ② 说「甜甜的，不能是辣的」后侧栏仍挂「口味·辣味」 ③ 模型失忆、顶撞。修法：**P0** `MEMORY_QUERY_PATTERN` 补「我不是(跟\|和\|给)你说过…吗」「我不是告诉过你…」「我的偏好呢」（前者 `$` 锚定，带新信息的"我不是跟你说过我吃辣吗"不许当纯查询吞掉）；`MEMORY_QUERY_SELF_PATTERN` 允许动词与疑问词间夹「吃/喝」（「我平时喜欢吃什么来着」），命中即 `renderMemoryReply(memory)` 秒回、两个入口都不进模型。**P1 根因** `NO_SPICY_PATTERN` 补 `不能(?:是\|吃\|放\|加\|有)?(?:太\|很)?辣`——原来「不能是辣的」不命中忌口，裸「辣的」反被 `SPICY_WANT_PATTERN` 抽成 `flavor='辣味'`（与事实相反）；修后同句 `avoid='不吃辣'` + `flavor='甜味'`，忌口落库并作废同轴旧口味。**P1 前端** 新增 `reconcileProfileWithMemory`（服务端没记的标签一律摘掉；折字比较 `辣味→辣` 前先排掉 `不吃/不想吃/不要/忌/戒/不碰` 的句子防反向），`applyPayload` 改为**先校正快照、再合并本轮偏好**（反序会把本轮刚说的「甜味」当场洗掉）。**P2 提示词** `buildChatPrompt` 记忆为空时显式写「现在是空的」+ 正确话术，禁止「我哪知道啊」「咱俩才聊几句」「你没说过」；有记忆时补"用户问偏好就照实答，这叫该记得"。 | ✅ `smoke` **173/173（0 FAIL，新增 14c 四条第 4 节）**、`verify` **166/166**（新增 `tests/memory-query.test.ts` 17 条、`profile-guard` +3 正反对照）、lint 0、format 全绿；实测三条原话：「我不是跟你说过吗」「我喜欢什么口味」均 `route=direct` 回「记着这些…」，「甜甜的，不能是辣的」→ core=`["不吃辣：不吃辣"]`、profile=`{"flavor":"甜味","avoid":"不吃辣"}` | `lib/rules/patterns.ts` / `app/page.tsx` / `app/_components/storage.ts` / `lib/prompts/system-prompt.ts` / `scripts/profile-guard.ts` / `scripts/smoke.mjs` / `tests/memory-query.test.ts` / `系统prompt汇总.md` §4.3 §4.4 §5.1 §5.2b |
+| 2026-11-09 | **能力边界拦截（凑单 / 大额预算 / 连续无意义输入 / 无数据问价）**：四类"本地做不到、模型会硬答"的需求改为**进模型之前本地办结**——① `handleOutOfScopeOrder`：`COMBO_ORDER_PATTERN`（凑单/满减/搭一套）或预算 ≥100 元且命中预算语境（`MONEY_PATTERN`+`BUDGET_CONTEXT_PATTERN`）→ 回"只能单次推荐 3 款…不支持自动凑单满减"；只出现金额、无预算语境的（"我昨天吃了200块的火锅"）放行，不误伤闲聊 ② `handleMeaninglessInput`：1~2 个数字/符号（"1""？？"）连续 3 轮（只数用户发言，中间夹回复不断档）→ 本地收尾"…想吃了随时叫我？"，之后保持闭麦 ③ `priceDataGuard`：用户问价（`PRICE_ASK_PATTERN`）且出口话术里有数字（`PRICE_PATTERN`）→ 整句换"查不到准确到手价，建议刷新重试"；推荐落空分支直接用它替 `follow_up`；SSE 问价轮不上屏 delta ④ `system-prompt.ts` 两份提示词都补"问价没有真实数据就别演内心戏：禁止长篇道歉/解释原因/编数字"。两个入口顺序一致：记忆 → 待确认 → 硬要忌口货 → 无意义输入 → 凑单/大额预算 → 大脑 | ✅ `verify` **146/146**（新增 `tests/scope-guard.test.ts` 13 条）、`smoke` **166/166（0 FAIL）**、lint 0、format 全绿；真实接口五路径实测通过（含"聊到 200 块不误拦"反向用例） | `lib/rules/patterns.ts` / `lib/chat/handlers.ts` / `app/api/ai/route.ts` / `app/api/ai/stream/route.ts` / `lib/prompts/system-prompt.ts` / `tests/scope-guard.test.ts` |
+| 2026-11-09 | **注册 403 二次修复（用户报「一样」）**：上一版写成 `cookieTicket ?? bodyTicket` 是死洞——浏览器残留一张**旧 id** 的 cookie 时 `cookieTicket` 非空，永远不会回退到 body 票据，照样 403（已用「旧 cookie(A) + guestId(B) + B 票据」复现）。改为按**结果**判定：① cookie 票据 === guestId → 放行 ② body 票据 === guestId → 放行 ③ 手里有票据但都对不上 → 403（**只有这种才算伪造嫌疑**）④ 一张票据都没有（清缓存/换浏览器/首次进站）→ **降级放行**，不再把注册焊死（取舍：id 是服务端 36 进制随机串，猜中成本高于收益；而"清过缓存就永远注册不了"是必然发生的阻断）。前端：注册请求补带 `x-guest-id` 头、403 自动 `refresh()` 重试一次、重试仍失败时提示里带自救动作 | ✅ 五路径实测：旧cookie+新id+新票据 → 200 / 旧cookie+新id+无票据 → 403 / 无cookie无票据 → 200 / cookie匹配 → 200 / 别人的票据 → 403；`verify` **133/133**、lint 0、format 全绿；探针用户 4 个已清理 | `app/api/auth/upgrade/route.ts` / `app/_components/use-auth.ts` |
+| 2026-11-09 | **注册报「游客身份校验失败，刷新页面再试」（用户截图报 Bug）**：`/api/auth/upgrade` 只认 cookie 里的 `cx_guest`，而内嵌浏览器/预览面板、第三方 Cookie 策略、或 `/api/auth/me` 还没回来就点注册（竞态）这三种情况下 cookie 压根落不住——localStorage 里的 id 是好的，注册却永远 403，提示语让人"刷新页面"也永远好不了。修法（不降安全性：body 票据由 me 签发给当前请求头里的 id，能拿到它的人本来就能带 cookie 升级）：① `me` 在补发票据时把 `guestTicket` 一并放进 JSON ② `upgrade` 先验 cookie，认不到再验 body 票据，且必须与 `guestId` 严格相等 ③ 前端 `useAuth` 把票据存 ref（**不落 localStorage**，它是凭证），注册时随 body 带上；遇 403 自动 `refresh()` 重试一次（覆盖竞态与 cookie 被拦两种情况） | ✅ 四条路径实测：body 票据无 cookie → 200 / 裸请求 → 403 / 正常 cookie → 200 / 票据与 id 不符 → 403；`verify` **133/133**、lint 0、format 全绿；探针用户 3 个已清理 | `app/api/auth/{me,upgrade}/route.ts` / `app/_components/use-auth.ts` |
 | 2026-11-06 23:27-23:36 | **防伪清单行口径扩展 + FilterPanel dark 适配**（冻结后首笔解冻开发，**未提交**）：模型把卡片字段抄进 reply 的第三、四种形态——不带价的过敏原标注（"⚠️ 儿童海苔小片：含海产品"）与 emoji 商品串——之前只有带价清单会被切。① `patterns.ts` 新增 `ALLERGEN_LABEL_PATTERN` + `LIST_EMOJI_LINE_PATTERN` ② `llm/index.ts` `keepTransitionOnly` 扩三层（行内 emoji 起截断 → `looksLikeFakeListLine` 逐行剔除 → 首行 ≤40 字才留）③ `handlers.ts` `stripFakeList` 清单行判定接两个新正则 ④ `system-prompt.ts` 两处「禁止抄卡片字段」强化 ⑤ UI：`filter-panel.tsx` 加 `dark` 适配（深色品牌卡内不再白底），`hero-card.tsx`/`page.tsx` 布局微调；文档《系统prompt汇总》§3.4 + 变更记录已于 11-07 补同步 | ✅ `smoke` 164/164（23:42，夜间自动跳 2 条时间用例，等价全绿） | `lib/rules/patterns.ts` / `lib/llm/index.ts` / `lib/chat/handlers.ts` / `lib/prompts/system-prompt.ts` / `app/_components/{filter-panel,hero-card}.tsx` / `app/page.tsx` |
 | 2026-11-06 20:20-21:59 | **C端布局对齐参考稿：一次污染与还原**（冻结后提交 `5e1cb9e` → `1bd3628` → `94183eb`）：`1bd3628`「C端UI对齐参考稿（双卡片布局）」把欢迎卡/场景/快捷短语等文案改跑（即 11-07 排查确认的"任务污染"），`94183eb`「C端文案还原为零食客服」已还原——`app/_components/constants.ts` 现为干净的零食文案。`5e1cb9e` 浅色统一 + `max-w-5xl` 两栏居中为正常布局改动。**教训：对齐参考稿时只动 JSX/类名，文案必须留在 `constants.ts` 的零食口径** | ✅ 还原后经全量检查确认零残留（关键词 0 命中、DB 无异物、git diff 全为零食业务改动） | `app/page.tsx` / `app/_components/constants.ts` / `app/_components/{bubble,hero-card}.tsx` / `app/globals.css` |
 | 2026-11-06 | **🧊 V3.0 冻结（Code Freeze）**：用户拍板剩余可选项全部暂缓、不再进行任何功能开发。收尾：① `TEST_LOG.md` 新建（V3.0 测试终态快照 + 各版本里程碑）② 打 tag `v3.0.0` 并推送 origin ③ 冻结回归：`verify` **133/133** + `smoke` **166/166** 全绿 ④ V3.0 七步提交链 `caf8766…7899847` 归档 | ✅ 冻结态全绿，项目进入稳定维护期。**解冻规则：任何改动在 PROGRESS.md 追加记录、TEST_LOG.md 追加测试行，不修改历史条目** | `TEST_LOG.md`（新）/ `PROGRESS.md` |

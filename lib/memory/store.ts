@@ -221,6 +221,40 @@ export interface WriteEntry {
 /** 单用户记忆条数上限：原来的 `list.slice(-200)`，超过就丢最旧的 */
 const MAX_PER_USER = 200;
 
+// ─── 口味轴（2026-11-09：口味一律长期化，冲突才确认）─────────────────────
+//
+// 这一层不能 import `lib/chat/handlers.ts`（handlers 反过来依赖 store，会循环），
+// 所以轴表在这里再写一份，口径与 `TASTE_AXIS` 一致：辣/甜/咸/酸/清淡。
+// 长的排前面，免得「清淡」被别的轴先截走。
+
+const TASTE_AXES = ['清淡', '辣', '甜', '咸', '酸'];
+const AVOID_MARK = /不吃|不想吃|不要|不碰|忌|戒|过敏|不耐|不能/;
+
+/** 一串文本里出现的第一个口味轴，不管它是不是忌口句 */
+function axisIn(text: string): string {
+  return TASTE_AXES.find((a) => text.includes(a)) || '';
+}
+
+/** 口味偏好句里的轴：带忌口标记的句子是"不吃X"，不是"爱吃X"，必须返回空 */
+function tasteAxisOfText(text: string): string {
+  return AVOID_MARK.test(text) ? '' : axisIn(text);
+}
+
+/** 把 `keyword：content` 形状的召回文本拆开 */
+function parseMemoryLine(text: string): { keyword: string; content: string } {
+  const [keyword, ...rest] = text.split('：');
+  return { keyword: keyword || '', content: rest.join('：') || text };
+}
+
+/** 召回文本池（active 三层 + pending 之外的），冲突判定只看这里 */
+function memoryPool(memory: RecalledMemory): { text: string; layer: MemoryLayer }[] {
+  return [
+    ...memory.core_profile.map((t) => ({ text: t, layer: 'core_profile' as const })),
+    ...memory.summary_memory.map((t) => ({ text: t, layer: 'summary_memory' as const })),
+    ...memory.active_fragments.map((t) => ({ text: t, layer: 'fragment_memory' as const })),
+  ];
+}
+
 /**
  * 写入记忆。同 layer+keyword+status 的已有记录做更新而不是堆一条新的，
  * 否则"不吃辣"会被写几十遍，检索出来的全是重复项。
@@ -342,7 +376,7 @@ export async function resolvePending(
     // 一个用户的 active 记录也就几条，捞出来比更简单也不慢。
     const active = await tx.memory.findMany({
       where: { userId, status: 'active', id: { not: pending.id } },
-      select: { id: true, keyword: true },
+      select: { id: true, keyword: true, content: true },
     });
     const doomed = active
       .filter(
@@ -357,6 +391,30 @@ export async function resolvePending(
         where: { id: { in: doomed } },
         data: { status: 'superseded' },
       });
+    }
+
+    /**
+     * 用户确认「是真的改口味」之后，别的口味轴上的旧偏好也要作废（2026-11-09）。
+     *
+     * 上面的 `doomed` 只按 pending 的关键词做包含匹配：从「辣」改成「甜」时
+     * baseKeyword 是"甜"，够不着 keyword="辣" 的那条，结果新旧两条口味并排 active。
+     * 这里补一刀：只动 `polarity='喜欢'` 且**轴不同**的口味行；
+     * 忌口 / 过敏行带否定词（`tasteAxisOfText` 直接返回空），一条都不会被误伤。
+     */
+    if (pending.category === '口味' && pending.polarity === '喜欢') {
+      const newAxis = axisIn(`${baseKeyword}${pending.content}`);
+      const staleTastes = active
+        .filter((r) => {
+          const old = tasteAxisOfText(`${r.keyword}${r.content}`);
+          return !!old && !!newAxis && old !== newAxis;
+        })
+        .map((r) => r.id);
+      if (staleTastes.length) {
+        await tx.memory.updateMany({
+          where: { id: { in: staleTastes } },
+          data: { status: 'superseded' },
+        });
+      }
     }
 
     await tx.memory.create({
@@ -492,12 +550,88 @@ export function decideMemoryAction(
   }
 
   const fact = facts[0];
+  const factAxis =
+    fact.category === '口味' && fact.polarity === '喜欢'
+      ? tasteAxisOfText(fact.value) || axisIn(fact.key)
+      : '';
+
+  /**
+   * 口味冲突（2026-11-09 用户拍板）：口味一律长期记，但**和已有记忆打架时先问本人**。
+   *
+   * 以前 `matchExisting` 只按字面包含找旧记录，「辣=喜欢辣」和新的「甜=喜欢甜味」
+   * 互相找不到 → 两条口味并排写进 core_profile，侧栏挂两个对立标签、
+   * 推荐同时吃到两个相反口味。现在两类冲突都挂 pending，提问明确区分
+   * 「临时尝鲜」和「真的改口味」——用户答临时就不更新，答真改才顶掉旧的。
+   */
+  if (factAxis) {
+    const pool = memoryPool(memory);
+    // 同轮已经明说的忌口会立刻作废旧口味（安全死命令），别拿那条旧口味来制造假冲突
+    const declaredAvoid = new Set(
+      facts
+        .filter((f) => f.category === '过敏忌口' && f.polarity === '拒绝')
+        .map((f) => axisIn(`${f.key}${f.value}`))
+        .filter(Boolean),
+    );
+
+    // ① 同轴忌口（记着"不吃辣"，这回又想吃辣）→ 确认后才敢撤忌口
+    const avoidHit = pool.find((p) => AVOID_MARK.test(p.text) && axisIn(p.text) === factAxis);
+    if (avoidHit) {
+      const parsed = parseMemoryLine(avoidHit.text);
+      return {
+        ...empty,
+        decision: 'confirmation_required',
+        matched_memory: { ...parsed, layer: avoidHit.layer },
+        conflicts: [
+          {
+            old_keyword: parsed.keyword,
+            old_content: parsed.content,
+            new_content: `${fact.key}=${fact.value}`,
+            conflict_type: '改口撞忌口',
+          },
+        ],
+        write_layer: 'fragment_memory',
+        confirmationquestion: `你之前说过${parsed.content}，这回又想吃${factAxis}的——是就这一回尝个鲜，还是以后都能吃了？说「临时」我就不动忌口，确认了才敢撤`,
+      };
+    }
+
+    // ② 异轴旧口味（记着爱吃辣，这回说甜）→ 确认是真改口味才作废旧的那条
+    const oldTaste = pool.find((p) => {
+      const old = tasteAxisOfText(p.text);
+      return !!old && old !== factAxis && !declaredAvoid.has(old) && /喜欢|爱吃|偏好/.test(p.text);
+    });
+    if (oldTaste) {
+      const parsed = parseMemoryLine(oldTaste.text);
+      const oldAxis = tasteAxisOfText(oldTaste.text);
+      return {
+        ...empty,
+        decision: 'confirmation_required',
+        matched_memory: { ...parsed, layer: oldTaste.layer },
+        conflicts: [
+          {
+            old_keyword: parsed.keyword,
+            old_content: parsed.content,
+            new_content: `${fact.key}=${fact.value}`,
+            conflict_type: '口味变化',
+          },
+        ],
+        write_layer: 'fragment_memory',
+        confirmationquestion: `你之前一直爱吃${oldAxis}的，这回换成${factAxis}的——是临时尝个鲜，还是以后就改口味了？说「临时」我就不动记着的，真改了我才更新`,
+      };
+    }
+  }
+
   const existing = matchExisting([fact], memory);
 
   // 已有同关键词的 active 记忆
   if (existing) {
     const sameValue = existing.content.includes(fact.value);
-    if (sameValue) {
+    // 同一个口味轴、只是措辞不同（"喜欢辣味" / "喜欢辣的"）→ 原地更新，
+    // 不能因此挂一次"改口了吗"的确认，也不能再堆一条重复的口味记录
+    const sameAxis =
+      !!factAxis &&
+      !AVOID_MARK.test(`${existing.keyword}${existing.content}`) &&
+      (tasteAxisOfText(existing.content) === factAxis || axisIn(existing.keyword) === factAxis);
+    if (sameValue || sameAxis) {
       return {
         ...empty,
         decision: 'consistent_update',

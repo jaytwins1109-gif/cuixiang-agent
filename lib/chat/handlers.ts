@@ -10,7 +10,12 @@
 // 这里只放「怎么判断、怎么组织响应」，正则字面量一律在 lib/rules/patterns.ts。
 
 import {
+  WHO_AM_I_PATTERN,
   MEMORY_QUERY_PATTERN,
+  MEMORY_QUERY_SELF_PATTERN,
+  MEMORY_QUERY_DEFER_PATTERN,
+  PENDING_TEMP_PATTERN,
+  PENDING_PERMANENT_PATTERN,
   MEMORY_CLEAR_PATTERN,
   MEMORY_DELETE_PATTERN,
   MEMORY_KEYWORD_PATTERN,
@@ -27,6 +32,13 @@ import {
   SPICY_DENIAL_PATTERN,
   ALLERGEN_LABEL_PATTERN,
   LIST_EMOJI_LINE_PATTERN,
+  COMBO_ORDER_PATTERN,
+  MONEY_PATTERN,
+  BUDGET_CONTEXT_PATTERN,
+  PRICE_ASK_PATTERN,
+  MEANINGLESS_INPUT_PATTERN,
+  PRICE_PATTERN,
+  KNOWN_SHORT,
 } from '@/lib/rules/patterns';
 import type { ChatMessage, Filters } from '@/lib/llm';
 import {
@@ -176,6 +188,34 @@ export function snapshot(m: RecalledMemory) {
     core_profile: m.core_profile,
     summary_memory: m.summary_memory,
     active_fragments: m.active_fragments,
+  };
+}
+
+/**
+ * 「我是谁」：答案在账号表的 nickname 里，**不在长期记忆里**。
+ *
+ * 本地办结是刻意的：模型手里没有账号表，问它"我是谁"只会编一个名字出来，
+ * 或者顺着上一轮的语气含糊过去。昵称由服务端 `resolveNickname()` 读（含默认值），
+ * 所以注册前 / 游客态也能答得上来。
+ *
+ * 必须在 `handleMemoryIntent` 之前调用：「你记得我是谁吗」同时命中记忆查询正则，
+ * 被那边接走就会甩一份"记着这些：不吃辣…"，答非所问。
+ */
+export function handleWhoAmI(
+  message: string,
+  nickname: string | null | undefined,
+  memory: RecalledMemory,
+  traceId?: string,
+): Record<string, unknown> | null {
+  if (!WHO_AM_I_PATTERN.test(message)) return null;
+  traceLocal(traceId, '身份意图:我是谁', '本地办结，不进大脑');
+  return {
+    route: 'direct',
+    reply: nickname
+      ? `你是 ${nickname} 呀！不管换啥设备我都认得你。`
+      : '你还没设置昵称呢，去右上角「我的」里设一个，以后我就这么叫你啦。',
+    // 与记忆问答同口径：把快照一起带回去，前端侧栏不会因为这轮没做记忆操作就清空
+    memory: snapshot(memory),
   };
 }
 
@@ -359,6 +399,175 @@ export async function handleInsistAvoid(
     profile: {},
     memory: snapshot(memory),
   };
+}
+
+// ─── 能力边界：凑单 / 大额预算 / 无意义输入（2026-11-09）────────────
+//
+// 这三件事的共同点：**本地链路做不到，但模型会硬答**。
+// 凑单它编满减、问价它编到手价、陪"1""2""3"它能陪到天亮。
+// 所以全部在进模型之前办结，话术写死在这里，不让模型自由发挥。
+
+/** 单次推荐能覆盖的预算上限：超过这个数，用户要的其实是"一套"，不是一款 */
+export const OUT_OF_SCOPE_BUDGET = 100;
+
+/** 超出能力范围时的统一话术（人设：不说"您"） */
+export const OUT_OF_SCOPE_REPLY =
+  '抱歉呀，我目前只能单次推荐 3 款零食，或者帮你挑单价合适的单品，暂时还不支持自动凑单满减哦。';
+
+/**
+ * 问价但没有真实价格数据时的兜底。
+ *
+ * 价格只存在于卡片数据里（`workflow.recommendations` / `PRODUCTS`），
+ * 卡片没生成时模型手里一个数都没有——它照样能报出"大概 15 块"，那就是凭空报价。
+ */
+export const PRICE_DATA_MISSING_REPLY = '稍等，我这边暂时查不到准确的到手价，建议你刷新重试。';
+
+/** 连续无意义输入到第 3 次时的收尾话术 */
+export const MEANINGLESS_CUTOFF_REPLY =
+  '看来你现在不想聊零食啦，要不咱们先歇会儿，想吃了随时叫我？';
+
+/** 连续多少次无意义输入就强行收尾 */
+const MEANINGLESS_CUTOFF = 3;
+
+/**
+ * 这条输入是不是"没在说话"：1~2 个数字或符号（"1" "2" "？？" "。。"）。
+ *
+ * 三个例外必须放行，否则会把正常对话当噪音收掉：
+ *   - 有汉字 / 英文字母：正经说话（"嗯""ok""行吧"）
+ *   - 命中 KNOWN_SHORT：666 / 233 这类语气发言，是接话不是乱敲
+ *   - 超过 2 个字符：信息量够了，交给模型正常理解
+ */
+export function isMeaninglessInput(text: string): boolean {
+  const t = (text || '').trim();
+  if (!t) return true;
+  // 英文字母先放行：ok / hi / 666 这类是接话，不是乱敲
+  if (/[a-z]/i.test(t)) return false;
+  const compact = t.replace(/\s+/g, '');
+  if (KNOWN_SHORT.test(compact)) return false;
+  /**
+   * 只认 1~2 个数字 / 符号。
+   *
+   * 这里**不能再加一道"含全角标点就算中文"的早退**（`isGibberish` 里有那条）：
+   * "？？""。。" 正是要拦的目标，它们本身就落在全角标点区间里，先判中文就全放过去了。
+   * 汉字不在 `\p{P}\p{S}\d` 里，所以这条正则天然不会误伤"嗯""行吧"。
+   */
+  return MEANINGLESS_INPUT_PATTERN.test(t);
+}
+
+/**
+ * 从最近几条消息里数"连续无意义输入"的轮数（含本轮）。
+ *
+ * 只数**用户**的连续发言：中间夹着我们的回复不算断——这正是"我回一句、他再敲个 1"的样子。
+ * 碰到第一条有意义的用户发言就停：那是对话重新接上了。
+ */
+export function meaninglessStreak(messages: ChatMessage[]): number {
+  let n = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'user') continue;
+    if (!isMeaninglessInput(messages[i].content || '')) break;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * 连续无意义输入的硬截断。
+ *
+ * 实测问题：用户连发"1""2""3"，模型每轮都接一句"嗯？想吃点啥"，对话永远推不动。
+ * 这种轮次不值得再花一次模型调用，也接不出任何有用信息——第 3 次直接收尾，
+ * 之后只要还是这种输入就继续回同一句（相当于把话口关掉），直到他说点正经的。
+ */
+export async function handleMeaninglessInput(
+  userId: string,
+  messages: ChatMessage[],
+  traceId?: string,
+): Promise<Record<string, unknown> | null> {
+  const streak = meaninglessStreak(messages);
+  if (streak < MEANINGLESS_CUTOFF) return null;
+
+  traceLocal(
+    traceId,
+    '连续无意义输入',
+    `连续 ${streak} 轮（阈值 ${MEANINGLESS_CUTOFF}）→ 本地收尾，不进模型`,
+  );
+  return {
+    route: 'direct',
+    reply: MEANINGLESS_CUTOFF_REPLY,
+    profile: {},
+    memory: snapshot(await recallMemory(userId)),
+  };
+}
+
+/**
+ * 这句是不是"本地能力之外的下单需求"。
+ *
+ * 两种：
+ *   1. 凑单 / 满减 / 搭一套——要的是多件结算，本地只有单次 3 款单品
+ *   2. 预算 ≥ `OUT_OF_SCOPE_BUDGET` 且确实在说预算（"预算 200""200 元以内"）
+ *
+ * 第 2 条必须有预算语境：光出现"200 元"不能拦，
+ * 「我昨天吃了 200 块的火锅」是聊天，回一句"不支持凑单"是答非所问。
+ */
+export function outOfScopeKind(message: string): 'combo' | 'budget' | null {
+  const text = message || '';
+  if (COMBO_ORDER_PATTERN.test(text)) return 'combo';
+
+  const money = text.match(MONEY_PATTERN);
+  if (!money) return null;
+  const amount = Number(money[1]);
+  if (!Number.isFinite(amount) || amount < OUT_OF_SCOPE_BUDGET) return null;
+  return BUDGET_CONTEXT_PATTERN.test(text) ? 'budget' : null;
+}
+
+/**
+ * 超出能力边界的下单需求：本地直接回绝，**不进模型、不出卡片**。
+ *
+ * 交给模型的话它会顺着承诺（"行，我给你配个 200 的套餐"），
+ * 可它既没有购物车也算不了满减，最后吐出的是编出来的活动规则。
+ */
+export async function handleOutOfScopeOrder(
+  userId: string,
+  message: string,
+  memory: RecalledMemory,
+  traceId?: string,
+): Promise<Record<string, unknown> | null> {
+  const kind = outOfScopeKind(message);
+  if (!kind) return null;
+
+  traceLocal(
+    traceId,
+    kind === 'combo' ? '凑单/满减需求' : '预算超出单次推荐能力',
+    `本地兜底话术，不进模型、不出卡片（${message.slice(0, 24)}）`,
+  );
+  return {
+    route: 'direct',
+    reply: OUT_OF_SCOPE_REPLY,
+    profile: {},
+    memory: snapshot(memory),
+  };
+}
+
+/** 这条输入是不是在问价（两个入口的"没货又要价"分支共用同一条口径） */
+export function asksPrice(message: string): boolean {
+  return PRICE_ASK_PATTERN.test(message || '');
+}
+
+/**
+ * 问价但没有卡片数据时的出口兜底。
+ *
+ * 陪聊轮 / 推荐落空轮都没有 `recommendations`，模型手里没有任何真实价格。
+ * 它这时候报出的每个数字都是编的——比"查不到"糟得多。
+ * 所以：用户确实在问价，且这句回复里出现了价（`PRICE_PATTERN`），整句换成兜底。
+ * 没问价、或回复里没报数字的，原样放行（别把正常接话也换掉）。
+ */
+export function priceDataGuard(message: string, reply: string, traceId?: string): string {
+  const text = (reply || '').trim();
+  if (!text) return text;
+  if (!PRICE_ASK_PATTERN.test(message || '')) return text;
+  if (!PRICE_PATTERN.test(text)) return text;
+
+  traceLocal(traceId, '问价但本轮没有价格数据', '模型报的价一律作废，换兜底话术');
+  return PRICE_DATA_MISSING_REPLY;
 }
 
 /**
@@ -621,12 +830,15 @@ export async function runLocalBrain(input: {
       );
       return {
         route: 'direct',
-        reply: blocked
-          ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card.name}就不给你推了。换个别的？`
-          : guardReply(
-              `${card.name}：${card.reason}。${card.price}元一份，要不要来一份？`,
-              freshMemory,
-            ),
+        reply: withPendingQuestion(
+          blocked
+            ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card.name}就不给你推了。换个别的？`
+            : guardReply(
+                `${card.name}：${card.reason}。${card.price}元一份，要不要来一份？`,
+                freshMemory,
+              ),
+          mem.question,
+        ),
         ...(blocked ? {} : { recommendations: [card] }),
         ...base,
       };
@@ -657,7 +869,10 @@ export async function runLocalBrain(input: {
     if (!recommendations.length) {
       return {
         route: 'direct',
-        reply: workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？',
+        reply: withPendingQuestion(
+          workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？',
+          mem.question,
+        ),
         awaiting_prefs: !!workflow?.follow_up,
         ...base,
       };
@@ -727,6 +942,18 @@ export { normalizeUserId } from '@/lib/auth/user-id';
 
 export function detectMemoryIntent(text: string): 'query' | 'clear' | 'delete' | null {
   if (MEMORY_QUERY_PATTERN.test(text)) return 'query';
+  /**
+   * 第一视角的问法（"我喜欢什么口味""我喜好啥"）2026-11-09 补齐。
+   *
+   * 这批句子以前一条规则都不命中，直接进了大脑；而记忆为空时提示词里连"记忆是空的"都没写，
+   * 模型只能说"我哪知道啊，咱俩才聊几句"。现在一律本地办结，由 `renderMemoryReply` 回话。
+   *
+   * `MEMORY_QUERY_DEFER_PATTERN` 是反向闸：「我喜欢什么都行，你看着推」是放权不是提问，
+   * 拿记忆清单回他会显得没听懂。
+   */
+  if (MEMORY_QUERY_SELF_PATTERN.test(text) && !MEMORY_QUERY_DEFER_PATTERN.test(text)) {
+    return 'query';
+  }
   // 全清必须先于单条删除判断，否则"全都忘掉"会被当成删某一条
   if (MEMORY_CLEAR_PATTERN.test(text)) return 'clear';
   if (MEMORY_DELETE_PATTERN.test(text)) return 'delete';
@@ -796,16 +1023,32 @@ export async function handlePendingConfirmation(
   message: string,
 ): Promise<string | null> {
   const text = message.trim();
-  // PENDING_NO_PATTERN 是 ^(锚定) 的：只有**以否定开头**才算否认——
-  // 「其实我觉得还好吧」这种"不是"不在句首的不会被误拦
-  const noHit = PENDING_NO_PATTERN.test(text);
-  // 带条件的长答案不自己判，交给大脑（见 looksQualifiedAnswer）；
-  // 否定开头的例外见上：办结挂着的确认，比把用户晾在追问里重要
-  if (looksQualifiedAnswer(text) && !noHit) return null;
 
-  const yes = PENDING_YES_PATTERN.test(text);
-  const no = !yes && noHit;
-  if (!yes && !no) return null;
+  /**
+   * 「临时尝鲜 / 以后就改了」这两类答复**先于长句放行判断**（2026-11-09）。
+   * 确认提问现在明确问的是"临时还是真改"，用户照着提问答就是长句，
+   * 旧口径 `looksQualifiedAnswer` 一见长句就放行大脑，pending 会永远挂着。
+   */
+  const temp = PENDING_TEMP_PATTERN.test(text);
+  const permanent = !temp && PENDING_PERMANENT_PATTERN.test(text);
+  let yes: boolean;
+  let tempAnswer = false;
+
+  if (temp || permanent) {
+    yes = permanent;
+    tempAnswer = temp;
+  } else {
+    // PENDING_NO_PATTERN 是 ^(锚定) 的：只有**以否定开头**才算否认——
+    // 「其实我觉得还好吧」这种"不是"不在句首的不会被误拦
+    const noHit = PENDING_NO_PATTERN.test(text);
+    // 带条件的长答案不自己判，交给大脑（见 looksQualifiedAnswer）；
+    // 否定开头的例外见上：办结挂着的确认，比把用户晾在追问里重要
+    if (looksQualifiedAnswer(text) && !noHit) return null;
+
+    yes = PENDING_YES_PATTERN.test(text);
+    const no = !yes && noHit;
+    if (!yes && !no) return null;
+  }
 
   const r = await resolvePending(userId, yes);
   if (!r) return null;
@@ -813,21 +1056,40 @@ export async function handlePendingConfirmation(
   // pending 的 content 形如"不吃辣=不吃辣"、"辣=喜欢辣"，取等号后面那段才是人话
   const shown = r.content.includes('=') ? r.content.split('=').pop() || r.content : r.content;
 
+  if (tempAnswer) return `行，这回就按你说的尝个鲜——${shown}不往长期记，原来那条口味我一条不动`;
   return yes
     ? `行，那以后按新的来——${shown}。旧的那条我就不提了`
     : `好嘞，刚才当我没问，${shown} 不往你身上记，还按原来的来`;
 }
 
+/**
+ * 把内部存储格式洗成人话。
+ *
+ * 库里存的是 `keyword：content`，而 content 本身常是 `关键词=喜欢X`
+ * （见 `factsFromMessage`），原样念出来就是「辣的：辣的=喜欢辣的」——
+ * 用户问「我喜欢什么口味」时看到这种机器话，比不说还难受。
+ * 这里按存储约定剥两层：`：` 取后半段，`=` 取后半段。
+ */
+function humanizeMemoryLine(text: string): string {
+  let s = (text || '').trim();
+  if (s.includes('：')) s = s.split('：').pop()!.trim();
+  if (s.includes('=')) s = s.split('=').pop()!.trim();
+  return s;
+}
+
 export function renderMemoryReply(memory: RecalledMemory): string {
-  const lines = [
-    ...memory.core_profile.map((t) => `· ${t}`),
-    ...memory.summary_memory.map((t) => `· ${t}`),
-    ...memory.active_fragments.map((t) => `· ${t}`),
-  ];
-  if (!lines.length) {
+  // 同一个意思可能同时存在 core 与 fragment 两层，洗完之后会重复，去个重
+  const items = Array.from(
+    new Set(
+      [...memory.core_profile, ...memory.summary_memory, ...memory.active_fragments]
+        .map(humanizeMemoryLine)
+        .filter(Boolean),
+    ),
+  );
+  if (!items.length) {
     return '还没记下啥。你说过我就记着——像"我不吃辣"这种，我以后都自动避开';
   }
-  return `记着这些：\n${lines.join('\n')}\n还有要我记的吗？`;
+  return `记着这些：\n${items.map((t) => `· ${t}`).join('\n')}\n还有要我记的吗？`;
 }
 
 /**
@@ -862,22 +1124,23 @@ export function avoidAxisOf(avoidText: string): string {
 
 /**
  * 本轮能写成长期记忆的事实。
- * 只记明确、长期的表达：忌口过敏一定记；"我平时都喜欢吃辣"这种带长期副词的才记口味，
- * 一次性的"来点辣的"不能污染长期偏好（工作流规则：不要把一次性需求推断成偏好）。
  *
- * 唯一的例外是**撞上忌口记忆**：记着"不吃辣"的人这轮开口要辣，
- * 这是一次性需求还是改口，本地判不了——必须挂待确认问本人（工作流规则 7）。
- * 以前这里只认"喜欢/爱吃"且不认 prefs.flavor，结果"今天想辣的发泄"一句事实都抽不出来，
- * 冲突感知整个是瞎的：pending 不生成、提问不问、用户改口永远没法生效。
+ * 2026-11-09 用户拍板的新口径：**口味不区分「一次性」和「长期」**。
+ * 用户说出口的口味（"来点甜的" / "我喜欢吃辣味" / "甜甜的"）一律产出一条口味事实，
+ * 由 `decideMemoryAction` 决定是写入还是挂待确认——
+ * 没有冲突就直接记下；撞上旧口味 / 忌口，就问本人「临时尝鲜还是真改口味」再决定更新。
  *
- * 2026-11-02 又修一次门槛：忌口事实只认本轮原话（prefs.avoid 可能是最近几轮的回声）；
- * 冲突分支也不再看 `!out.length` 了——它把"我平时都喜欢吃辣的"这种真正的改口挡在门外，
- * 详见函数内注释。
+ * 依据只取 `extractPrefsFromText(本轮原话)`，`prefs.flavor` 是 mergedPrefs（含近 4 轮回声
+ * 与模型推测），拿它当写入依据会把"用户没说的口味"记成长期偏好。
+ *
+ * ⚠️ 保留的两条安全红线：
+ *   - 忌口 / 过敏**只认本轮原话**（`statedAvoid`），回声不算；
+ *   - 纯抱怨句（"这些也不辣"）整轮不写记忆，带长期副词的例外照旧。
  */
 export function factsFromMessage(
   message: string,
   prefs: Record<string, any>,
-  memory?: RecalledMemory,
+  _memory?: RecalledMemory,
 ): MemoryFact[] {
   const out: MemoryFact[] = [];
 
@@ -887,8 +1150,9 @@ export function factsFromMessage(
   //   ① 它命中 decideMemoryAction 里那条"过敏忌口"早退分支（直接 return new_memory），
   //      冲突判定压根没机会跑；
   //   ② 等于每轮都在重写一条用户这轮没提过的忌口。
-  // 「这轮原话抽得出忌口吗」交给 extractPrefsFromText 答——不另立一份拒绝词表。
-  const statedAvoid = extractPrefsFromText(message).avoid;
+  const local = extractPrefsFromText(message);
+  const statedAvoid = local.avoid;
+  const statedFlavor = local.flavor;
   const avoid = (prefs.avoid || '').trim();
   /**
    * 对上一轮推荐的质疑（"这些也不辣"）不是忌口声明。
@@ -896,7 +1160,6 @@ export function factsFromMessage(
    * 实测事故：用户嫌推的不够辣，说了句"这些也不辣"，被抽成 `avoid='不吃辣'`
    * 记进长期记忆；下一轮再要辣，`buildNeed` 把"辣味"同时塞进 `taste_preference`
    * 和 `avoid_tags`，硬过滤把辣款全踢光，回一句"这个条件有点刁钻"。
-   * 越抱怨越吃不到，闭环彻底反了。
    */
   const complainingAboutPicks =
     PICK_REFERENCE_PATTERN.test(message) && SPICY_DENIAL_PATTERN.test(message);
@@ -904,13 +1167,11 @@ export function factsFromMessage(
   // 把它当长期偏好信号，抱怨句就又能混进记忆
   const longTerm = /一直|平时|一般|通常|以后|从来|总是|都(?:喜欢|爱|吃|喝)/.test(message);
 
-  // 纯评价句（"这些也不辣"）整轮都不写记忆：它评价的是上一轮的货，不是用户的长期偏好。
-  // 只排掉忌口是不够的——prefs 里带着上一轮的 flavor 回声，会顺势判成"改口要辣"，
-  // 然后弹出"你之前说过不吃辣，现在改口？"这种驴唇不对马嘴的确认。
+  // 纯评价句整轮都不写记忆：它评价的是上一轮的货，不是用户的偏好。
   // 带长期副词的（"这些也不辣，我平时都吃重辣"）例外，那是真在说偏好。
   if (complainingAboutPicks && !longTerm) return out;
 
-  if (avoid && avoid !== 'null' && statedAvoid && !complainingAboutPicks) {
+  if (avoid && avoid !== 'null' && statedAvoid) {
     out.push({
       category: '过敏忌口',
       key: avoid,
@@ -920,46 +1181,28 @@ export function factsFromMessage(
     });
   }
 
-  const like = message.match(/(?:喜欢|爱吃|爱|偏好|钟爱)([^，。！？\s]{1,6})/);
-  if (longTerm && like && like[1]) {
+  if (statedFlavor) {
+    // key 用口味轴（"甜味"→"甜"）：库里存的形状是 `甜=喜欢甜味`，
+    // 侧栏快照校正、同轴去重、确认后作废旧轴口味全都靠这个字对齐
+    const axis = TASTE_AXIS[statedFlavor] || statedFlavor;
     out.push({
       category: '口味',
-      key: like[1].trim(),
-      value: `喜欢${like[1].trim()}`,
+      key: axis,
+      value: `喜欢${statedFlavor}`,
       polarity: '喜欢',
       confidence: 0.6,
     });
-  }
-
-  // 本轮开口要的口味撞上长期记住的忌口 → 冲突事实，交 decideMemoryAction 挂待确认。
-  // **过敏不在内**：过敏是死命令，没有"改口"这个选项，绝不能拿来问用户要不要作废
-  const want = (prefs.flavor || '').trim();
-  const axis = want ? TASTE_AXIS[want] : '';
-  // 门槛不能是 `!out.length`：out 里那条口味事实（"我平时都喜欢…"抽出来的）
-  // 跟"这轮是不是改口"毫无关系——拿它当门槛，改口永远问不出口（实测事故：
-  // 记着"不吃辣"的人说"我平时都喜欢吃辣的"，既没挂 pending，
-  // 又把"喜欢吃辣的"当新记忆写进去，跟忌口并存）。
-  // 真正该拦的是**用户这轮亲口重申了同一个忌口**：说"我不吃辣"不能被读成想改口要辣。
-  const restatedAvoid = !!statedAvoid && statedAvoid.includes(axis);
-  if (axis && memory && !restatedAvoid) {
-    const pool = [
-      ...(memory.core_profile || []),
-      ...(memory.summary_memory || []),
-      ...(memory.active_fragments || []),
-    ];
-    const clash = pool.find((t) => t.includes(axis) && /不吃|不要|忌|戒|不碰|不想吃|不嗜/.test(t));
-    if (clash) {
-      // 冲突是本轮**最重要**的一条事实：decideMemoryAction 只看 facts[0]
-      // （拿它去记忆里对、也拿它写 pending），所以必须排到最前面去。
-      // 排后面的话，决策看的是"喜欢吃辣的"那条——它在记忆里对不上"不吃辣"，
-      // 会被当成新记忆直接写进去：问都不问就把忌口改了。
-      out.unshift({
+  } else {
+    // 非口味的"喜欢XX"（薯片之类）沿用旧的长期副词门槛，
+    // 免得把一次性点单记成一条没有口味轴的怪条目
+    const like = message.match(/(?:喜欢|爱吃|爱|偏好|钟爱)([^，。！？\s]{1,6})/);
+    if (longTerm && like && like[1]) {
+      out.push({
         category: '口味',
-        // key 用轴上的那个字：matchExisting 靠它去记忆里对上"不吃辣"这条
-        key: axis,
-        value: `想吃${axis}`,
+        key: like[1].trim(),
+        value: `喜欢${like[1].trim()}`,
         polarity: '喜欢',
-        confidence: 0.5,
+        confidence: 0.6,
       });
     }
   }
@@ -975,7 +1218,14 @@ export function factsFromMessage(
 
 /**
  * 记忆同步：写新偏好 / 更新一致项 / 待确认的挂 pending / 要求删除的软删除。
- * 冲突没确认前绝不覆盖旧偏好——工作流规则 7 明确要求。
+ *
+ * 2026-11-09 改为**逐条事实处理**：一轮里用户可能同时说了忌口和口味
+ * （「甜甜的，不能是辣的」），以前只看 `facts[0]`，第二条直接被丢掉——
+ * 用户说的话只记一半，正是"记忆断层"的来源。
+ *
+ * 顺序有讲究：忌口先落库并作废同轴旧口味，再重新召回一次，
+ * 后面的口味事实按**最新**记忆判冲突。否则「不想吃辣了，想吃甜的」里
+ * 旧的「喜欢辣」会被当成与新「喜欢甜」打架，凭空弹出一次确认。
  */
 export async function syncMemory(
   userId: string,
@@ -984,76 +1234,66 @@ export async function syncMemory(
   memory: RecalledMemory,
   traceId?: string,
 ): Promise<{ question: string | null }> {
-  // memory 一并传进去：撞忌口的冲突事实要靠它才认得出来（见 factsFromMessage）
   const facts = factsFromMessage(message, prefs, memory);
   if (!facts.length) return { question: null };
 
-  const d = decideMemoryAction(
-    facts,
-    memory,
-    MEMORY_DELETE_PATTERN.test(message) ? '删除记忆' : '表达偏好',
-  );
-  // 只有"本地替用户做了个判断"才值得打点：改口要挂待确认、或者本轮要求删除。
-  // 常规写入（new_memory / consistent_update）每轮都在发生，打进去就等于没有信号——
-  // [Local] 的定义是"拦截/兜底"，不是"这轮动了记忆"。
-  if (d.decision === 'confirmation_required' || d.decision === 'delete_required') {
-    traceLocal(
-      traceId,
-      `记忆冲突:${facts.map((f) => f.category).join('/')}`,
-      d.decision === 'delete_required'
-        ? '本轮要求删除，软删旧偏好'
-        : '改口撞上旧偏好 → 挂 pending 并向本人追问',
-    );
-  }
+  const intent = MEMORY_DELETE_PATTERN.test(message) ? '删除记忆' : '表达偏好';
+  let current = memory;
+  let question: string | null = null;
 
-  if (d.decision === 'delete_required') {
-    await deleteMemory(userId, d.matched_memory.keyword);
-    return { question: null };
-  }
+  for (let i = 0; i < facts.length; i++) {
+    const fact = facts[i];
+    // 第一条带上整份 facts：decideMemoryAction 要看见"同轮明说的忌口"，
+    // 才不会把即将被作废的旧口味误判成冲突
+    const d = decideMemoryAction(i === 0 ? facts : [fact], current, intent);
 
-  if (d.decision === 'new_memory' || d.decision === 'consistent_update') {
-    const fact = facts[0];
-    await writeMemory(userId, [
-      {
-        layer: d.write_layer === 'none' ? 'core_profile' : d.write_layer,
-        keyword: d.matched_memory.keyword || fact.key,
-        content: d.matched_memory.content || `${fact.key}=${fact.value}`,
-        category: fact.category,
-        polarity: fact.polarity,
-        status: 'active',
-      },
-    ]);
-    // 同维度互斥（2026-11-03）：忌口落库的同一瞬间，把这个口味轴上的旧偏好作废。
-    // 以前只写不管——「不想吃辣了，想吃甜的」之后口味·辣味还挂着，
-    // 侧栏两条对立标签并排，下一轮推荐同时吃到两个相反的约束。
-    // 注意方向：忌口 → 口味是用户本轮明说的作废（直接办）；
-    // 口味 → 忌口绝不能走这里（过敏是死命令，改口必须走 pending 确认）。
-    if (fact.polarity === '拒绝') {
-      const axis = avoidAxisOf(`${fact.key}${fact.value}`);
-      const n = await supersedeTasteConflicts(userId, axis);
-      if (n > 0) traceLocal(traceId, `同维度互斥:${axis}`, `忌口写入 → 作废 ${n} 条旧口味偏好`);
+    if (d.decision === 'delete_required') {
+      traceLocal(traceId, '记忆冲突:删除', '本轮要求删除，软删旧偏好');
+      await deleteMemory(userId, d.matched_memory.keyword);
+      return { question: null };
     }
-    return { question: null };
+
+    if (d.decision === 'confirmation_required') {
+      traceLocal(traceId, '记忆冲突:口味改口', '挂 pending 并向本人追问临时 / 真改');
+      await writeMemory(userId, [
+        {
+          layer: 'fragment_memory',
+          keyword: `待确认_${fact.key}`,
+          content: `${fact.key}=${fact.value}`,
+          category: fact.category,
+          polarity: fact.polarity,
+          status: 'pending',
+        },
+      ]);
+      // 挂上待确认还不够——提问必须真的问出去，pending 才有人认领。
+      question = d.confirmationquestion || null;
+      break;
+    }
+
+    if (d.decision === 'new_memory' || d.decision === 'consistent_update') {
+      await writeMemory(userId, [
+        {
+          layer: d.write_layer === 'none' ? 'core_profile' : d.write_layer,
+          keyword: d.matched_memory.keyword || fact.key,
+          content: d.matched_memory.content || `${fact.key}=${fact.value}`,
+          category: fact.category,
+          polarity: fact.polarity,
+          status: 'active',
+        },
+      ]);
+      // 同维度互斥（2026-11-03）：忌口落库的同一瞬间，把这个口味轴上的旧偏好作废。
+      // 忌口是死命令，不等确认；口味 → 忌口绝不走这里（必须 pending 确认）。
+      if (fact.polarity === '拒绝') {
+        const axis = avoidAxisOf(`${fact.key}${fact.value}`);
+        const n = await supersedeTasteConflicts(userId, axis);
+        if (n > 0) traceLocal(traceId, `同维度互斥:${axis}`, `忌口写入 → 作废 ${n} 条旧口味偏好`);
+      }
+      // 后面几条事实必须按写入后的最新记忆判，不能拿本轮开头的旧快照
+      current = await recallMemory(userId);
+    }
   }
 
-  if (d.decision === 'confirmation_required') {
-    const fact = facts[0];
-    await writeMemory(userId, [
-      {
-        layer: 'fragment_memory',
-        keyword: `待确认_${fact.key}`,
-        content: `${fact.key}=${fact.value}`,
-        category: fact.category,
-        polarity: fact.polarity,
-        status: 'pending',
-      },
-    ]);
-    // 挂上待确认还不够——这句提问必须由我们问出去，用户才有机会答，
-    // 否则 pending 永远没人认领，"改口"这条路径等于废的。由 handlePendingConfirmation 收尾。
-    return { question: d.confirmationquestion || null };
-  }
-
-  return { question: null };
+  return { question };
 }
 
 /**

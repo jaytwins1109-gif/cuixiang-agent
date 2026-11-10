@@ -20,6 +20,7 @@ import {
   signUserToken,
   normalizeRole,
 } from '@/lib/auth/jwt';
+import { cleanNickname, defaultNickname } from '@/lib/auth/nickname';
 
 export const runtime = 'nodejs';
 
@@ -54,8 +55,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '邮箱或密码不对' }, { status: 401 });
     }
 
+    // 老账号（昵称功能上线前注册的）第一次登录时补一个默认昵称，别让侧栏空着
+    const nickname = cleanNickname(user.nickname) || defaultNickname(user.email, user.id);
+    if (!user.nickname) {
+      await prisma.user.update({ where: { id: user.id }, data: { nickname } });
+    }
+
     const token = await signUserToken(user.id, normalizeRole(user.role));
-    const res = NextResponse.json({ userId: user.id, email: user.email });
+    const res = NextResponse.json({ userId: user.id, email: user.email, nickname });
     res.headers.append('Set-Cookie', cookieString(TOKEN_COOKIE, token, TOKEN_MAX_AGE));
     // 登录成功清掉游客票据：后续 upgrade 不该再拿老游客 id 来改东西
     res.headers.append('Set-Cookie', clearCookieString(GUEST_COOKIE));

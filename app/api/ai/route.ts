@@ -29,6 +29,7 @@ import { syncProductCache } from '@/lib/data/product-cache';
 import { logMessage } from '@/lib/chat/logger';
 import { GUEST_COOKIE, GUEST_MAX_AGE, cookieString } from '@/lib/auth/jwt';
 import { resolveIdentity } from '@/lib/auth/identity';
+import { resolveNickname } from '@/lib/auth/nickname';
 import { checkRateLimit } from '@/lib/auth/rate-limit';
 import {
   newTraceId,
@@ -40,11 +41,16 @@ import {
   runWithTrace,
 } from '@/lib/chat/trace';
 import {
+  handleWhoAmI,
   handleMemoryIntent,
   handlePendingConfirm,
   handleInsistAvoid,
+  handleMeaninglessInput,
+  handleOutOfScopeOrder,
   cardBlocked,
   guardReply,
+  priceDataGuard,
+  asksPrice,
   stripFakeList,
   runRecommendation,
   runLocalBrain,
@@ -54,6 +60,7 @@ import {
   snapshot,
   pickTransition,
   withPendingQuestion,
+  PRICE_DATA_MISSING_REPLY,
 } from '@/lib/chat/handlers';
 
 export const runtime = 'nodejs';
@@ -190,6 +197,13 @@ async function handleTurn({
     { role: 'user' as const, content: body.message },
   ];
 
+  // 1.5 昵称（账号表，不是长期记忆）：本地「我是谁」要用，两条模型链路的 system 顶部也要注入
+  const nickname = await resolveNickname(userId);
+
+  // 2. 「我是谁」本地办结：必须在记忆问答之前（"你记得我是谁吗"两边都命中）
+  const whoRes = handleWhoAmI(body.message, nickname, memory, traceId);
+  if (whoRes) return whoRes;
+
   // 2. 记忆的查询 / 删除 / 清空：本地就能办结，不必惊动大脑（省一次往返）
   const memRes = await handleMemoryIntent(userId, body.message, memory, traceId);
   if (memRes) return memRes;
@@ -203,10 +217,19 @@ async function handleTurn({
   const insistRes = await handleInsistAvoid(userId, body.message, memory, traceId);
   if (insistRes) return insistRes;
 
+  // 2.7 连续无意义输入（"1""2""3"）：第 3 轮起本地收尾，不再让模型接茬
+  const quietRes = await handleMeaninglessInput(userId, messages, traceId);
+  if (quietRes) return quietRes;
+
+  // 2.8 凑单 / 满减 / 大额预算：本地没有购物车，进模型只会换来一套编出来的活动规则
+  const scopeRes = await handleOutOfScopeOrder(userId, body.message, memory, traceId);
+  if (scopeRes) return scopeRes;
+
   // 3. 大脑：判断意图 + 抽偏好 + 说人话
   const brainCtx = {
     inRecommendContext: body.inRecommendContext,
     memoryText: renderMemoryForPrompt(memory),
+    nickname: nickname ?? undefined,
   };
   const brainRes = await callBrain(
     messages,
@@ -298,12 +321,16 @@ async function handleTurn({
     );
     // 陪聊轮没有卡片，模型却自己编了"1. XX｜X元"的清单 → 截掉，只留安抚语
     const stripped = stripFakeList(brainRes.reply?.trim() || '', traceId);
-    const chatReply = guardReply(
-      apologizeForMissedScene(
-        body.message,
-        withPendingQuestion(stripped || UNCLEAR_REPLY, mem.question),
+    const chatReply = priceDataGuard(
+      body.message,
+      guardReply(
+        apologizeForMissedScene(
+          body.message,
+          withPendingQuestion(stripped || UNCLEAR_REPLY, mem.question),
+        ),
+        memory,
+        traceId,
       ),
-      memory,
       traceId,
     );
     // 在往零食方向抛钩子 = 铺垫中。前端把它算进推荐上下文，用户下一轮点头就直接接上推荐，
@@ -333,9 +360,12 @@ async function handleTurn({
     const blocked = cardBlocked(card, freshMemory, traceId);
     return {
       route: 'direct',
-      reply: blocked
-        ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card?.name}就不给你推了。换个别的？`
-        : guardReply(brainRes.reply?.trim() || 'emmm 这个我还不太了解', freshMemory, traceId),
+      reply: withPendingQuestion(
+        blocked
+          ? `这个我得拦一下——${blocked.replace(/^用户/, '你')}，${card?.name}就不给你推了。换个别的？`
+          : guardReply(brainRes.reply?.trim() || 'emmm 这个我还不太了解', freshMemory, traceId),
+        mem.question,
+      ),
       profile: cleanProfile(body.message, prefs),
       ...(card && !blocked ? { recommendations: [card] } : {}),
       memory: snapshot(freshMemory),
@@ -357,11 +387,18 @@ async function handleTurn({
   });
 
   if (!recommendations.length) {
+    // 问价但一件都没选出来：手里没有任何真实价格，追问一句"你预算多少"等于把问题丢回去。
+    // 直接说"查不到 + 让刷新"，比让模型顺着报一个假的数字强（2026-11-09 报价事故口径）。
+    const emptyReply = asksPrice(body.message)
+      ? PRICE_DATA_MISSING_REPLY
+      : workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？';
     return {
       route: 'direct',
-      reply: workflow?.follow_up || 'emmm 这个条件有点刁钻，换宽松点我再给你找？',
+      // 0 卡片（含"改口味追问场景"）也要把确认提问带出去：
+      // 口味冲突挂了 pending 却不问出口，下一轮用户无从回答，确认永远挂着
+      reply: withPendingQuestion(emptyReply, mem.question),
       // 追问偏好也算推荐进行中：下一轮用户报偏好要按"回答推荐追问"处理
-      awaiting_prefs: !!workflow?.follow_up,
+      awaiting_prefs: !asksPrice(body.message) && !!workflow?.follow_up,
       profile: cleanProfile(body.message, prefs),
       memory: snapshot(freshMemory),
     };

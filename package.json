@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify": "tsc --noEmit && vitest run",
-    "guard": "node --import ./scripts/ts-alias-register.mjs scripts/profile-guard.ts && node --import ./scripts/ts-alias-register.mjs scripts/reco-guard.ts",
+    "guard": "node --import ./scripts/ts-alias-register.mjs scripts/profile-guard.ts && node --import ./scripts/ts-alias-register.mjs scripts/reco-guard.ts && node --import ./scripts/ts-alias-register.mjs scripts/shop-guard.ts",
     "smoke": "node scripts/smoke.mjs",
     "capture-log": "node scripts/capture-log.mjs",
     "gen-password": "node scripts/gen-password.mjs",

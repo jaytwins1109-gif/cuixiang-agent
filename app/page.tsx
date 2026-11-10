@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { AuthDialog, type AuthMode } from './_components/auth-dialog';
@@ -9,7 +10,11 @@ import { HeroCard, SkeletonBubble } from './_components/hero-card';
 import { finalPrice } from './_components/format';
 import { NavBtn } from './_components/nav-btn';
 import { SnackCard } from './_components/snack-card';
-import { mergeProfileExclusive, stripVolatileProfile } from './_components/storage';
+import {
+  mergeProfileExclusive,
+  reconcileProfileWithMemory,
+  stripVolatileProfile,
+} from './_components/storage';
 import { applyTheme, readTheme } from './_components/theme';
 import { useAuth } from './_components/use-auth';
 import { ThemeSwitch } from './_components/theme-switch';
@@ -67,6 +72,35 @@ export default function Page() {
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
+  /** 「我的」里的昵称编辑：纯本地 state，保存成功后由 useAuth 直接改状态，不刷新页面 */
+  const [nickEditing, setNickEditing] = useState(false);
+  const [nickDraft, setNickDraft] = useState('');
+  const [nickBusy, setNickBusy] = useState(false);
+  const [nickError, setNickError] = useState<string | null>(null);
+
+  function startNickEdit() {
+    setNickDraft(auth.nickname || '');
+    setNickError(null);
+    setNickEditing(true);
+  }
+
+  async function saveNickname() {
+    const value = nickDraft.trim();
+    if (!value) {
+      setNickError('昵称不能是空的');
+      return;
+    }
+    if (nickBusy) return;
+    setNickBusy(true);
+    setNickError(null);
+    const r = await auth.updateNickname(value);
+    setNickBusy(false);
+    if (!r.ok) {
+      setNickError(r.error || '没存上，稍后再试');
+      return;
+    }
+    setNickEditing(false);
+  }
 
   /**
    * 统一请求头：游客身份走 `x-guest-id`（服务端以它为准），
@@ -167,6 +201,24 @@ export default function Page() {
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [messages, loading]);
 
+  /**
+   * `/shop` 货架的「问问脆脆」会把商品名塞进 `/?ask=…` 跳回来：
+   * 读档完成后把这句话自动发出去，发完立刻把参数从地址栏抹掉，
+   * 免得刷新 / 后退又把同一句重发一遍。
+   *
+   * 只认 hydrated 的 0→1 这一次：send 每次渲染都是新引用，进依赖会反复触发。
+   * 用 history.replaceState 而不是 router.replace：后者会触发一次 Next 导航，
+   * 刚发出去的流式请求可能被重渲染打断。
+   */
+  useEffect(() => {
+    if (!hydrated) return;
+    const raw = new URLSearchParams(window.location.search).get('ask');
+    if (!raw) return;
+    const text = raw.trim().slice(0, 120);
+    window.history.replaceState(null, '', window.location.pathname);
+    if (text) void send(text);
+  }, [hydrated]);
+
   // 输入框随内容长高，最多到 160px 后自己滚
   useEffect(() => {
     const el = inputRef.current;
@@ -224,6 +276,21 @@ export default function Page() {
 
     if (data.memory && typeof data.memory === 'object') {
       applyMemorySnapshot(data.memory as MemorySnapshot);
+      /**
+       * 收到快照就以服务端为准：本地 profile 里服务端没有的那几条要摘掉（2026-11-09）。
+       *
+       * 现场：用户问「我喜欢什么口味」，后端一条记忆都没有，侧栏却还挂着「口味·辣味」——
+       * 那是 localStorage 里的旧缓存，服务端从没记过（"今天想吃辣"按设计不写长期记忆）。
+       * 界面挂着、选品却不按它来，等于前端自己造了个"我记得"的幻觉。
+       */
+      setProfile((prev) => reconcileProfileWithMemory(prev, data.memory));
+    } else if (typeof data.route === 'string') {
+      /**
+       * 正常对话结果却没带 memory：说明这条支路没给快照。
+       * 宁可当空，也别让上一轮的标签继续挂着冒充"我记着"。
+       */
+      applyMemorySnapshot(null);
+      setProfile({});
     }
   }
 
@@ -372,6 +439,20 @@ export default function Page() {
     // 用户答完偏好或点一下头，下一轮直接接上推荐
     recommendCtx.current = !!cards || !!data.awaiting_prefs || !!data.lead_in;
 
+    /**
+     * 先按服务端快照校正，再合并本轮偏好——顺序不能反（2026-11-09）。
+     *
+     * `reconcileProfileWithMemory` 只看得到 `prev`（还没合本轮的），所以它只能
+     * 清掉"上一轮留在 localStorage 里、服务端从没记过"的旧标签（比如一直挂着的「口味·辣味」）。
+     * 本轮用户刚说出口的偏好必须**在这之后**合进来——它们的出处是这一句原话
+     * （`pickTrustedProfile` 已核过），不是历史缓存，不能被"服务端没记"误删。
+     *
+     * 反过来的顺序（先合并再校正）实测把「甜甜的，不能是辣的」的「口味·甜味」
+     * 当场洗掉了：甜味是一次性口味，按设计不写长期记忆，于是侧栏只剩忌口，
+     * 用户会觉得"我说了甜它没记住"。
+     */
+    applyMemoryPayload(data);
+
     // 后端本轮回的偏好：只可能是"用户这轮原话里有出处"的那几条
     // （后端 `pickTrustedProfile` 已拿本地抽取核过一遍，这里再按白名单兜一道）。
     // **不再无条件合并**——以前模型当轮填什么就存什么，
@@ -384,8 +465,6 @@ export default function Page() {
         setProfile((prev) => mergeProfileExclusive(prev, incoming));
       }
     }
-
-    applyMemoryPayload(data);
   }
 
   /**
@@ -722,11 +801,17 @@ export default function Page() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 sm:p-6">
-      <div className="flex h-[90vh] w-full max-w-[1200px] gap-6">
+      {/*
+        黑色外框：把左侧深色卡和右侧聊天区**贴边包在一起**。
+        以前两栏各带圆角、中间隔着 gap-6 的浅灰底，看着像两块拼不上的板子；
+        现在去掉间隙、外框只留 6px 黑边（p-1.5），子块圆角 = 外框圆角 - 内边距，
+        四角的黑边厚度才均匀。抽屉是 fixed，不受这里的 overflow-hidden 影响。
+      */}
+      <div className="flex h-[90vh] w-full max-w-[1200px] overflow-hidden rounded-[28px] bg-[#0F172A] p-1.5 shadow-xl ring-1 ring-black/20">
         {/* ── 左侧品牌卡（深色沉浸式，桌面常驻）：下半部分内嵌筛选面板 ── */}
         <aside className="hidden w-[300px] shrink-0 lg:block">
           <HeroCard>
-            <div className="scroll-slim max-h-full overflow-y-auto pr-1">
+            <div className="scroll-slim h-full overflow-y-auto pr-1">
               <FilterPanel
                 filters={filters}
                 onToggle={toggle}
@@ -768,7 +853,7 @@ export default function Page() {
         )}
 
         {/* ── 右侧聊天区 ──────────────────────── */}
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[22px] bg-white">
           {/* Header：h-16，底边极细分割线 */}
           <header className="flex h-16 shrink-0 items-center gap-2 border-b border-slate-100 px-4 sm:gap-3 sm:px-5">
             {/* ☰：口味/偏好抽屉入口（筛选面板桌面已入深色卡，这里只留给移动端） */}
@@ -793,6 +878,16 @@ export default function Page() {
             </div>
 
             <nav className="ml-auto flex items-center gap-1 text-sm sm:gap-1.5">
+              {/* 明确购买意图的短路：直接去 0 Token 货架，不用等 AI 一张张吐卡片 */}
+              <Link
+                href="/shop"
+                className="inline-flex min-h-[40px] items-center justify-center gap-1 whitespace-nowrap rounded-full px-2.5 text-slate-600 transition hover:bg-slate-100 sm:px-3"
+                aria-label="去货架直接挑零食"
+                title="直接逛货架，不用等 AI"
+              >
+                <span className="text-base">🛍️</span>
+                <span className="hidden text-xs font-semibold sm:inline">逛货架</span>
+              </Link>
               <button
                 onClick={newChat}
                 className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-full bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:bg-slate-50"
@@ -860,24 +955,28 @@ export default function Page() {
                   可以选下面的话题，也可以在输入框直接提问。
                 </p>
 
-                {/* 四张快捷提问卡：细边框圆角，hover 轻微上浮 */}
-                <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {/* 四张快捷提问卡：宽度减半（一行四张），图标后面直接跟文字，横向紧凑排 */}
+                <div className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-4">
                   {WELCOME_CARDS.map((s) => (
                     <button
                       key={s.title}
                       onClick={() => send(s.text)}
-                      className="group animate-fade-in rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card"
+                      className="group flex animate-fade-in items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-card"
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-lg">
-                          {s.icon}
-                        </div>
-                        <span className="text-xs text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500">
-                          →
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base">
+                        {s.icon}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-bold text-slate-700">
+                          {s.title}
                         </span>
-                      </div>
-                      <div className="mt-2.5 font-bold text-slate-700">{s.title}</div>
-                      <div className="mt-0.5 text-xs leading-relaxed text-slate-400">{s.sub}</div>
+                        <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                          {s.sub}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500">
+                        →
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -974,42 +1073,97 @@ export default function Page() {
                 <h3 className="mb-2 text-xs font-bold tracking-wider text-slate-400">账号</h3>
                 {auth.loading ? (
                   <p className="text-xs text-slate-400">正在读取账号…</p>
-                ) : auth.email ? (
-                  <div className="flex items-center gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold text-slate-800">
-                        {auth.email}
-                      </div>
-                      <div className="mt-0.5 text-[11px] text-slate-400">
-                        换设备登录也不会丢记忆
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => void handleLogout()}
-                      className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                    >
-                      退出
-                    </button>
-                  </div>
                 ) : (
                   <>
-                    <p className="text-[11px] leading-relaxed text-slate-400">
-                      你现在是游客，记住的东西只跟着这台浏览器走，清缓存就没了。
-                    </p>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        onClick={() => openAuth('upgrade')}
-                        className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-full bg-cx-300 px-3 py-1 text-[11px] font-bold text-white hover:bg-cx-400"
-                      >
-                        注册（保留现在的记忆）
-                      </button>
-                      <button
-                        onClick={() => openAuth('login')}
-                        className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                      >
-                        登录
-                      </button>
+                    {/* 昵称放在邮箱上面：默认昵称由服务端生成，改完立刻反映在这里 */}
+                    <div className="mb-3 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                      <div className="text-[10px] font-semibold tracking-wider text-slate-400">
+                        我的昵称
+                      </div>
+                      {nickEditing ? (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <input
+                            autoFocus
+                            value={nickDraft}
+                            maxLength={24}
+                            onChange={(e) => setNickDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void saveNickname();
+                              if (e.key === 'Escape') setNickEditing(false);
+                            }}
+                            placeholder="给自己起个名"
+                            aria-label="昵称"
+                            className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-sm text-slate-800 outline-none focus:border-cx-300"
+                          />
+                          <button
+                            onClick={() => void saveNickname()}
+                            disabled={nickBusy}
+                            className="inline-flex min-h-[32px] shrink-0 items-center justify-center rounded-lg bg-cx-300 px-2.5 text-[11px] font-bold text-white hover:bg-cx-400 disabled:opacity-60"
+                          >
+                            {nickBusy ? '…' : '保存'}
+                          </button>
+                          <button
+                            onClick={() => setNickEditing(false)}
+                            className="inline-flex min-h-[32px] shrink-0 items-center justify-center rounded-lg px-1.5 text-[11px] text-slate-400 hover:text-slate-700"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="mt-0.5 flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-base font-bold text-slate-800">
+                            {auth.nickname || '还没设置昵称'}
+                          </span>
+                          <button
+                            onClick={startNickEdit}
+                            aria-label="修改昵称"
+                            title="修改昵称"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm hover:bg-slate-100"
+                          >
+                            🖊️
+                          </button>
+                        </div>
+                      )}
+                      {nickError && <p className="mt-1 text-[11px] text-rose-500">{nickError}</p>}
                     </div>
+                    {auth.email ? (
+                      <div className="flex items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-slate-800">
+                            {auth.email}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-400">
+                            换设备登录也不会丢记忆
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => void handleLogout()}
+                          className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          退出
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-[11px] leading-relaxed text-slate-400">
+                          你现在是游客，记住的东西只跟着这台浏览器走，清缓存就没了。
+                        </p>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() => openAuth('upgrade')}
+                            className="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-full bg-cx-300 px-3 py-1 text-[11px] font-bold text-white hover:bg-cx-400"
+                          >
+                            注册（保留现在的记忆）
+                          </button>
+                          <button
+                            onClick={() => openAuth('login')}
+                            className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            登录
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </section>

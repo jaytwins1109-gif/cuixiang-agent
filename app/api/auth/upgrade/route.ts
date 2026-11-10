@@ -21,6 +21,7 @@ import {
   verifyGuestTicket,
 } from '@/lib/auth/jwt';
 import { strictUserId } from '@/lib/auth/user-id';
+import { cleanNickname, defaultNickname } from '@/lib/auth/nickname';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +32,7 @@ const BCRYPT_ROUNDS = 10;
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as {
     guestId?: unknown;
+    guestTicket?: unknown;
     email?: unknown;
     password?: unknown;
   } | null;
@@ -41,8 +43,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '游客身份不合法，刷新页面再试' }, { status: 400 });
   }
 
-  const ticketGuest = await verifyGuestTicket(req.cookies.get(GUEST_COOKIE)?.value);
-  if (ticketGuest !== guestId) {
+  /**
+   * 票据判定（2026-11-09 第二次修，用户报「改了还一样」）：
+   *
+   *   ① cookie 票据 === guestId          → 放行（正常浏览器）
+   *   ② body 票据 === guestId            → 放行（cookie 存不住，或 cookie 里是旧 id）
+   *   ③ 手里有票据、但两张都对不上      → 403（**只有这种才是伪造嫌疑**）
+   *   ④ 一张票据都没有                  → 降级放行（用户刚清空缓存 / 换浏览器 / 首次进站）
+   *
+   * 上一版写成 `cookieTicket ?? bodyTicket` 是个死洞：cookie 里残留一张**旧 id** 的票时，
+   * cookieTicket 非空就不会回退到 body 票据，用户每次注册都被 403 挡回去，
+   * 而 Set-Cookie 若被拦（内嵌预览、第三方 Cookie 策略）刷新也永远好不了。
+   *
+   * ④ 放行的取舍（拍板）：id 是服务端 `u_<ts36>_<rand>` / `guest_<ts36>_<rand>` 的随机串，
+   * 猜中成本远高于收益；而"清过缓存就永远注册不了"是 100% 会发生的真实阻断。
+   * 宁可放行真实用户，也不要把注册这条路焊死——真正要拦的是"拿着别人的票据来升级"。
+   */
+  const cookieTicket = await verifyGuestTicket(req.cookies.get(GUEST_COOKIE)?.value);
+  const bodyTicket =
+    typeof body?.guestTicket === 'string' ? await verifyGuestTicket(body.guestTicket) : null;
+  const hasTicket = Boolean(cookieTicket || bodyTicket);
+  const matched = cookieTicket === guestId || bodyTicket === guestId;
+  if (hasTicket && !matched) {
     return NextResponse.json({ error: '游客身份校验失败，刷新页面再试' }, { status: 403 });
   }
 
@@ -83,8 +105,14 @@ export async function POST(req: NextRequest) {
       update: { email, password: hashed, isGuest: false },
     });
 
+    // 注册完就有默认昵称（"用户" + 邮箱前缀前 4 位）；老用户已经自己改过的不许覆盖
+    const nickname = cleanNickname(user.nickname) || defaultNickname(email, guestId);
+    if (!user.nickname) {
+      await prisma.user.update({ where: { id: guestId }, data: { nickname } });
+    }
+
     const token = await signUserToken(user.id, normalizeRole(user.role));
-    const res = NextResponse.json({ userId: user.id, email: user.email });
+    const res = NextResponse.json({ userId: user.id, email: user.email, nickname });
     res.headers.append('Set-Cookie', cookieString(TOKEN_COOKIE, token, TOKEN_MAX_AGE));
     // 升级完游客票据就作废，避免它继续被用来"再升级一次"
     res.headers.append('Set-Cookie', clearCookieString(GUEST_COOKIE));

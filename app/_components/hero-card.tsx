@@ -8,8 +8,13 @@ import type { ReactNode } from 'react';
  * children 里的交互（选口味/价格/忘偏好）直接复用 page 的既有回调，本组件不带状态。
  */
 export function HeroCard({ children }: { children?: ReactNode }) {
+  /**
+   * 三段式固定高度布局：顶部品牌信息 shrink、中间筛选槽 flex-1 可滚、底部版权固定。
+   * 黑色外框是 overflow-hidden + 90vh，整张卡自己滚会把版权推到滚动区外看不见
+   * （贴边包住之后实测过），所以只让中间的筛选面板滚。
+   */
   return (
-    <div className="flex h-full w-full flex-col rounded-3xl bg-[#1E293B] p-6 text-white">
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-[22px] bg-[#1E293B] p-6 text-white">
       {/* eyebrow 行：品牌定位 + 在线状态 */}
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold tracking-[0.18em] text-white/40">
@@ -44,10 +49,10 @@ export function HeroCard({ children }: { children?: ReactNode }) {
       </div>
 
       {/* 筛选面板插槽：口味/价格/当前偏好（page 传入深色适配的 FilterPanel） */}
-      {children && <div className="mt-6">{children}</div>}
+      {children && <div className="mt-4 min-h-0 flex-1 overflow-hidden">{children}</div>}
 
-      {/* 底部版权：mt-auto 贴着卡片底 */}
-      <div className="mt-auto pt-6">
+      {/* 底部版权固定可见，不跟着筛选面板一起滚 */}
+      <div className="shrink-0 pt-3">
         <p className="text-[10px] leading-relaxed text-white/30">
           脆香零食 · 数字零食助手 v3.0
           <br />© 2026 Cuixiang. All rights reserved.

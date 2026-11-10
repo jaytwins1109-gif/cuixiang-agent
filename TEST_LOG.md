@@ -40,4 +40,8 @@
 
 | 日期 | 改动 | 结果 | 说明 |
 |---|---|---|---|
+| 2026-11-10 | **异常重启读档收尾：昵称 + `/shop` 两摊一起补齐并提交** | 快检 `verify` **212/212**（+20 shop-guard）、lint 0、`format:check` 全绿、`npm run guard` **GUARD_FAILED=0**（profile/reco/shop 三个守卫）；`smoke` **228/228（0 FAIL）** | ① 昵称：§38 全链路（默认昵称 / 我是谁 / PATCH / 立刻生效 / 持久化 / 注册登录 / SSE 同口径 / 脏值清洗 / 自我介绍反向对照）② `/shop`：新增 `scripts/shop-guard.ts` 静态扫 import 链（7 文件、19 条断言 + 3 条反向对照），挂 `npm run guard` 与 `tests/shop-guard.test.ts`；首页补 `href="/shop"` 入口与 `?ask=` 消费闭环；smoke §39 拉起守卫 + HTTP 200 / 库内 48 款在架商品全部命中 / HTML 不含 `/api/ai` / 首页入口 / `?ask=` 落地页可达。探针用户已清理 |
+| 2026-11-09 | 能力边界拦截（凑单/大额预算 → 本地兜底；连续 3 轮无意义输入 → 硬截断；问价无数据 → 兜底替换；两份提示词补价格红线） | `smoke` **166/166（0 FAIL）**；`verify` **146/146**；真实接口五路径（含"聊到200块不误拦"反向用例）；lint 0、format 全绿 | 四类判定函数在 `lib/chat/handlers.ts`，正则集中在 `patterns.ts`；两个入口顺序一致，SSE 问价轮不上屏 delta |
+| 2026-11-09 | 注册 403 二次修复：判定改为「cookie 或 body 票据有一张对得上即放行；都拿不出来（清缓存/首次进站）也放行；只有拿得出票据却对不上才 403」 | 五路径实测：旧cookie+新id+新票据→200 / 旧cookie+新id+无票据→403 / 无cookie无票据→200 / cookie匹配→200 / 别人的票据→403；`verify` **133/133**、lint 0、format 全绿 | 上一版 `cookieTicket ?? bodyTicket` 在"旧 cookie 残留"时永不回退到 body 票据（已复现），是本次「改了还一样」的根因；探针用户 4 个已清理 |
+| 2026-11-09 | 注册 403「游客身份校验失败」修复（`cx_guest` cookie 落不住时的 body 票据兜底 + 前端 403 自动重试） | `verify` **133/133**；HTTP 四路径：body 票据无 cookie→200 / 裸请求→403 / 正常 cookie→200 / 票据与 id 不符→403 | 用户截图报 Bug；探针用户 3 个已清理；lint 0、format 全绿 |
 | 2026-11-07 记录（跑于 11-06 23:42） | 防伪清单行口径扩展（`ALLERGEN_LABEL_PATTERN` / `LIST_EMOJI_LINE_PATTERN`，`keepTransitionOnly` 三层清洗）+ `FilterPanel` dark 适配 | `smoke` **164/164** | 冻结后首笔改动；夜里自动跳 2 条时间用例（166-2=164），等价全绿。文档《系统prompt汇总》§3.4 与变更记录已同步 |

@@ -26,6 +26,7 @@ import {
   verifyUserToken,
 } from '@/lib/auth/jwt';
 import { resolveIdentity } from '@/lib/auth/identity';
+import { cleanNickname, resolveNickname } from '@/lib/auth/nickname';
 import { recallMemory } from '@/lib/memory/store';
 
 export const runtime = 'nodejs';
@@ -60,6 +61,8 @@ export async function GET(req: NextRequest) {
           userId: user.id,
           email: user.email,
           isGuest: user.isGuest,
+          // nickname 为空时按规则兜默认值并落库（2026-11-10）
+          nickname: await resolveNickname(user.id),
           memory: {
             core_profile: memory.core_profile,
             summary_memory: memory.summary_memory,
@@ -109,7 +112,15 @@ export async function GET(req: NextRequest) {
     userId: identity.userId,
     email: null,
     isGuest: true,
+    // 游客也带一个默认昵称：邮箱为空时按 userId 后 4 位生成
+    nickname: await resolveNickname(identity.userId),
     memory,
+    /**
+     * 票据同时放进 body：内嵌浏览器 / 第三方 Cookie 被拦时 cx_guest 存不住，
+     * 前端注册时把它随 body 带回 /api/auth/upgrade（那边 cookie 校验有回退）。
+     * 没补发（票据本来就对得上）时是 null，前端会留着上一次那张。
+     */
+    guestTicket: identity.guestTicket ?? null,
   });
   if (staleToken) {
     res.headers.append('Set-Cookie', clearCookieString(TOKEN_COOKIE));
@@ -121,4 +132,42 @@ export async function GET(req: NextRequest) {
     );
   }
   return res;
+}
+
+/**
+ * 改自己的昵称（2026-11-10）。
+ *
+ * 身份口径与 AI 入口完全一致：`resolveIdentity()` 认 cookie 或 `x-guest-id`，
+ * 不收 body 里的 userId——那是自报身份，等于允许改别人的资料。
+ * 游客行可能还不存在（没聊过 / 没写过记忆），所以走 upsert：
+ * 建行时只带 id + isGuest，别顺手把 password / email 写成假值。
+ *
+ * 昵称要拼进 system prompt，`cleanNickname()` 负责挡掉换行、引号、括号和控制字符。
+ */
+export async function PATCH(req: NextRequest) {
+  const body = (await req.json().catch(() => null)) as { nickname?: unknown } | null;
+  const nickname = cleanNickname(body?.nickname);
+  if (!nickname) {
+    return NextResponse.json({ error: '昵称不能是空的（最多 24 个字）' }, { status: 400 });
+  }
+
+  try {
+    const identity = await resolveIdentity(req);
+    await prisma.user.upsert({
+      where: { id: identity.userId },
+      create: { id: identity.userId, nickname, isGuest: identity.isGuest },
+      update: { nickname },
+    });
+    const res = NextResponse.json({ ok: true, userId: identity.userId, nickname });
+    if (identity.guestTicket) {
+      res.headers.append(
+        'Set-Cookie',
+        cookieString(GUEST_COOKIE, identity.guestTicket, GUEST_MAX_AGE),
+      );
+    }
+    return res;
+  } catch (err) {
+    console.error('[auth/me] PATCH', err);
+    return NextResponse.json({ error: '昵称没存上，稍后再试' }, { status: 500 });
+  }
 }
