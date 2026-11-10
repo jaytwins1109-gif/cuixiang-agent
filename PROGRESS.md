@@ -12,11 +12,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 最后更新 | 2026-11-10（**昵称 + `/shop` 两摊收尾完成并一次性提交**；异常重启后靠本文件 + `AGENTS.md` + `docs/TEST_LOG.md` 读档恢复，用户拍板「C，纳入」） |
-| 当前在做 | 无。上一项两摊收尾已结转到 §2 |
-| 最近回归 | `verify` **212/212**、lint 0、`format:check` 全绿、`npm run guard` 三个守卫 `GUARD_FAILED=0`、`smoke` **228/228（0 FAIL）** |
-| 阻塞 | 无 |
-| 下一步 | 按 `DEPLOY.md` 部署上云（记得配 `AUTH_SECRET` 并用 `openssl rand -base64 32` 生成）；`prisma generate` / `db push` 要在部署机跑一次（`User.nickname` 新字段） |
+| 最后更新 | 2026-11-10（**本地生产部署已完成并验证**；上云推送被本机代理拦截、且本机未装 Docker，见阻塞项） |
+| 当前在做 | 部署：本地生产构建 + `next start` 已起、冒烟全过；云部署待解决网络 / 装 Docker |
+| 最近回归 | `verify` **212/212**、lint 0、`format:check` 全绿、`npm run guard` 三个守卫 `GUARD_FAILED=0`、`smoke` **228/228（0 FAIL）**、`npm run build` 成功（19 页 + 中间件 37kB）、生产 `/api/health` = `{"status":"ok","db":"connected"}`、游客→注册升级闭环 200（验 `AUTH_SECRET` 签发） |
+| 阻塞 | ① `git push origin main` 被本机代理（`127.0.0.1`）拦截，连不上 `github.com:443`——代码已提交（639a15c）但推不到远程，云部署路线（Render/Railway 从仓库拉代码）卡在这 ② 本机未装 Docker，`docker compose up` 路线跑不了（DEPLOY.md 主路线） |
+| 下一步 | **本地已是可用的生产服务**：`http://localhost:3000`（prod 模式，`NODE_ENV=production`）。要上云二选一：A. 本机装 Docker + 让 GitHub 可达，再 `docker compose up -d --build`；B. 在能连 GitHub 的机器 `git push`，去 Render/Railway 接仓库（环境变量从 `.env.local` 搬过去：`AUTH_SECRET` / `DEEPSEEK_API_KEY` / `ADMIN_PASSWORD_HASH`，平台设 `TZ=Asia/Shanghai`、`DATABASE_URL=file:/var/data/cuixiang.db` + 挂持久盘） |
 | 怎么验证 | 快检（秒级、不用起服务）：`npm run verify` + `npm run lint` + `npm run format:check` + `npm run guard`；端到端 `npm run smoke` 要先在 3000 起 dev server，一轮约 1.5~5 分钟，**务必 `Start-Process` 后台跑**（前台超时会连带杀掉 dev server，见 §4 #8）；`npm run build` 前必须先停 dev server（两者共用 `.next`） |
 
 ---
